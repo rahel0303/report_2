@@ -1,0 +1,1 @@
+export { SmartTableBlock } from './SmartTableBlock';

@@ -1,0 +1,82 @@
+import { Activity, CheckCircle2, BarChart2, ImageIcon, SlidersHorizontal } from 'lucide-react';
+import { TableType } from '@/app/types';
+
+export const TABLE_TYPES: Record<string, TableType> = {
+  performance: {
+    id: 'performance',
+    label: 'Performance Overview',
+    icon: Activity,
+    description: 'Month-over-month comparison of key profile metrics.',
+    rowType: 'comparison',
+    columns: [
+      { id: 'profile_reach', label: 'Profile Reach', format: 'compact' },
+      { id: 'profile_visit', label: 'Profile Visit', format: 'number' },
+      { id: 'growth', label: 'Followers Growth', format: 'number' },
+      { id: 'reach', label: 'Reach', format: 'compact' },
+      { id: 'engagement', label: 'Engagement', format: 'number' },
+      { id: 'likes', label: 'Likes', format: 'number' },
+      { id: 'comments', label: 'Comments', format: 'number' },
+      { id: 'shares', label: 'Shares', format: 'number' },
+      { id: 'saves', label: 'Saves', format: 'number' },
+      { id: 'er_reach', label: 'ER Reach', format: 'percent' },
+      { id: 'er_followers', label: 'ER Followers', format: 'percent' },
+    ],
+  },
+  kpi: {
+    id: 'kpi',
+    label: 'KPI Achievements',
+    icon: CheckCircle2,
+    description: 'Cross-channel performance against goals.',
+    rowType: 'channels',
+    columns: [
+      { id: 'followers', label: 'Followers', format: 'compact' },
+      { id: 'ytd_growth', label: 'YTD Growth', format: 'percent' },
+      { id: 'monthly_growth', label: 'MoM Growth', format: 'percent' },
+      { id: 'channel_reach', label: 'Reach', format: 'compact' },
+      { id: 'profile_visit', label: 'Profile Visit', format: 'number' },
+      { id: 'total_eng', label: 'Total Eng.', format: 'compact' },
+    ],
+  },
+  post_performance: {
+    id: 'post_performance',
+    label: 'Post Performance',
+    icon: BarChart2,
+    description: 'Content output and viewership trends.',
+    rowType: 'comparison',
+    columns: [
+      { id: 'post_count', label: 'Post Count', format: 'number' },
+      { id: 'reach', label: 'Reach', format: 'compact' },
+      { id: 'engagement', label: 'Engagement', format: 'compact' },
+      { id: 'views', label: 'Views', format: 'compact' },
+      { id: 'watch_time', label: 'Avg Watch Time', format: 'time' },
+    ],
+  },
+  post_type: {
+    id: 'post_type',
+    label: 'Post Type Performance',
+    icon: ImageIcon,
+    description: 'Breakdown by format (Image, Reels, Carousel).',
+    rowType: 'types',
+    columns: [
+      { id: 'post_count', label: 'Post Count', format: 'number' },
+      { id: 'reach', label: 'Reach', format: 'compact' },
+      { id: 'engagement', label: 'Engagement', format: 'compact' },
+      { id: 'likes', label: 'Likes', format: 'number' },
+      { id: 'comments', label: 'Comments', format: 'number' },
+      { id: 'shares', label: 'Shares', format: 'number' },
+      { id: 'saves', label: 'Saves', format: 'number' },
+    ],
+  },
+  custom: {
+    id: 'custom',
+    label: 'Custom Table',
+    icon: SlidersHorizontal,
+    description: 'Build your own table.',
+    rowType: 'generic',
+    columns: [
+      { id: 'metric_1', label: 'Metric 1', format: 'number' },
+      { id: 'metric_2', label: 'Metric 2', format: 'percent' },
+      { id: 'metric_3', label: 'Metric 3', format: 'compact' },
+    ],
+  },
+};

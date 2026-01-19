@@ -1,0 +1,18 @@
+[
+  {
+    "id": "light_theme",
+    "name": "Fresh Light",
+    "type": "light",
+    "colors": ["#FFFFFF", "#334B48", "#5CE1D3", "#96B1AD", "#FFB4EA", "#CA7EB2"],
+    "brandColor": "#334B48",
+    "textColor": "text-slate-900"
+  },
+  {
+    "id": "dark_theme",
+    "name": "Forest Dark",
+    "type": "dark",
+    "colors": ["#334B48", "#5CE1D3", "#96B1AD", "#FFB4EA", "#CA7EB2"],
+    "brandColor": "#5CE1D3",
+    "textColor": "text-white"
+  }
+]
