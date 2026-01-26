@@ -8,6 +8,9 @@ export const AiPromptModal: React.FC<AiPromptModalProps> = ({
   onClose,
   onGenerate,
   config,
+  contextData,
+  contextType,
+  autoGenerate = false,
 }) => {
   if (!isOpen) return null;
   const [prompt, setPrompt] = useState('');
@@ -16,16 +19,33 @@ export const AiPromptModal: React.FC<AiPromptModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!prompt.trim()) return;
+    if (!prompt.trim() && !contextData) return;
 
     setIsGenerating(true);
 
     try {
       const systemPrompt =
-        "You are a professional social media analyst helper. Your goal is to generate a single, professional insight paragraph suitable for a presentation slide based on the user's request. Use *bold* for emphasis on key metrics or trends. Keep it concise (under 50 words) and impactful.";
-      const result = await generateGeminiContent(prompt, systemPrompt);
+        "You are a professional social media analyst helper. Your goal is to generate a single, professional insight paragraph suitable for a presentation slide based on the user's request. Use *bold* for emphasis on key metrics or trends. Keep it concise (under 50 words) and impactful. Return ONLY the content without any intro text.";
+
+      let fullPrompt = prompt;
+
+      // If we have context data, include it in the analysis
+      if (contextData) {
+        const contextStr = JSON.stringify(contextData, null, 2);
+        fullPrompt = `Context Data:\n${contextStr}\n\nUser Request: ${prompt || 'Provide 3 key insights from this data in bullet points'}\n\nProvide ONLY the insights without any intro text:`;
+      }
+
+      let result = await generateGeminiContent(fullPrompt, systemPrompt);
+
+      // Clean AI response - remove intro phrases
+      result = result
+        .replace(/^(Tentu|Sure|Berikut|Here|Okay|Here is|Here's|Berikut adalah)[^\n]*\n*/gi, '')
+        .replace(/^[^:]*:\s*/g, '')
+        .trim();
+
       onGenerate(result);
       setPrompt('');
+      onClose();
     } catch (err) {
       console.error(err);
     } finally {
@@ -56,13 +76,17 @@ export const AiPromptModal: React.FC<AiPromptModalProps> = ({
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="What should I analyze? (e.g., 'Summarize the engagement drop...')"
+            placeholder={
+              contextData
+                ? "(Optional) Add refinement instructions like 'make it more concise' or 'format as bullet points'..."
+                : "What should I analyze? (e.g., 'Summarize the engagement trends...')"
+            }
             className={`w-full h-32 p-3 rounded-xl resize-none text-sm border focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none mb-4 ${
               isDark
                 ? 'bg-slate-800 border-slate-700 text-white placeholder:text-slate-500'
                 : 'bg-slate-50 border-slate-200 text-slate-800'
             }`}
-            autoFocus
+            autoFocus={!contextData}
           />
 
           <div className="flex justify-end gap-2">
@@ -78,7 +102,7 @@ export const AiPromptModal: React.FC<AiPromptModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={!prompt.trim() || isGenerating}
+              disabled={isGenerating}
               className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 disabled:opacity-50 transition-all"
             >
               {isGenerating ? (
@@ -86,7 +110,7 @@ export const AiPromptModal: React.FC<AiPromptModalProps> = ({
               ) : (
                 <Sparkles size={14} />
               )}
-              {isGenerating ? 'Generating...' : 'Generate Insight'}
+              {isGenerating ? 'Generating...' : contextData ? 'Generate Insights' : 'Generate'}
             </button>
           </div>
         </form>

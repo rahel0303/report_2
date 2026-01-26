@@ -9,6 +9,7 @@ export const SmartTableBlock: React.FC<SmartTableBlockProps> = ({
   savedState,
   onSave,
   className,
+  isExport = false,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [tableState, setTableState] = useState<TableConfig | null>(savedState || null);
@@ -18,6 +19,14 @@ export const SmartTableBlock: React.FC<SmartTableBlockProps> = ({
   }, [savedState]);
 
   const isDark = config.theme.type === 'dark';
+
+  // Font sizes - much larger for export
+  const fontSize = {
+    header: isExport ? 'text-lg' : 'text-[10px]',
+    headerSub: isExport ? 'text-base' : 'text-[9px]',
+    cell: isExport ? 'text-lg' : 'text-[10px]',
+  };
+
   const styles = {
     cardBg: isDark ? 'bg-slate-800' : 'bg-white',
     textMain: isDark ? 'text-white' : 'text-slate-900',
@@ -41,7 +50,7 @@ export const SmartTableBlock: React.FC<SmartTableBlockProps> = ({
       if (format === 'percent') return val + '%';
       if (format === 'compact')
         return Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(
-          val
+          val,
         );
       if (format === 'time') return val + 's';
       return val.toLocaleString();
@@ -130,18 +139,18 @@ export const SmartTableBlock: React.FC<SmartTableBlockProps> = ({
             <thead className={`sticky top-0 z-10 ${styles.headerBg}`}>
               <tr>
                 <th
-                  className={`px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider border-b w-24 sticky left-0 z-20 ${styles.border} ${styles.textMuted} ${styles.headerBg}`}
+                  className={`px-3 py-2 text-left ${fontSize.header} font-bold uppercase tracking-wider border-b w-24 sticky left-0 z-20 ${styles.border} ${styles.textMuted} ${styles.headerBg}`}
                 >
                   {typeDef.rowType === 'comparison'
                     ? 'Period'
                     : typeDef.rowType === 'channels'
-                    ? 'Channel'
-                    : 'Category'}
+                      ? 'Channel'
+                      : 'Category'}
                 </th>
                 {visibleCols.map((col) => (
                   <th
                     key={col.id}
-                    className={`px-2 py-2 text-[9px] font-bold uppercase tracking-wider border-b min-w-[60px] ${styles.border} ${styles.textMuted}`}
+                    className={`px-2 py-2 ${fontSize.headerSub} font-bold uppercase tracking-wider border-b min-w-[60px] ${styles.border} ${styles.textMuted}`}
                   >
                     {col.label}
                   </th>
@@ -157,7 +166,7 @@ export const SmartTableBlock: React.FC<SmartTableBlockProps> = ({
                   }`}
                 >
                   <td
-                    className={`px-3 py-2 text-left text-[10px] font-bold sticky left-0 z-10 ${
+                    className={`px-3 py-2 text-left ${fontSize.cell} font-bold sticky left-0 z-10 ${
                       styles.textMain
                     } ${isDark ? 'bg-slate-800' : 'bg-white'}`}
                   >
@@ -169,7 +178,7 @@ export const SmartTableBlock: React.FC<SmartTableBlockProps> = ({
                       return (
                         <td
                           key={col.id}
-                          className={`px-2 py-2 text-[10px] font-bold font-mono ${
+                          className={`px-2 py-2 ${fontSize.cell} font-bold font-mono ${
                             cellData.isPositive ? 'text-emerald-500' : 'text-rose-500'
                           }`}
                         >
@@ -181,7 +190,7 @@ export const SmartTableBlock: React.FC<SmartTableBlockProps> = ({
                     return (
                       <td
                         key={col.id}
-                        className={`px-2 py-2 text-[10px] font-mono ${styles.textMuted}`}
+                        className={`px-2 py-2 ${fontSize.cell} font-mono ${styles.textMuted}`}
                       >
                         {cellData}
                       </td>

@@ -27,6 +27,15 @@ export interface ReportConfig {
   font: FontOption;
   clientName: string;
   selectedCompetitors: string[];
+  coverDesign?: {
+    templateId: number;
+    logoData: string;
+    colors: {
+      primary: string;
+      secondary: string;
+      accent: string;
+    };
+  };
 }
 
 // Slide Types
@@ -214,6 +223,9 @@ export interface AiPromptModalProps {
   onClose: () => void;
   onGenerate: (text: string) => void;
   config: ReportConfig;
+  contextData?: any; // Optional data for analysis
+  contextType?: string; // Type of analysis
+  autoGenerate?: boolean; // If true, generates without user prompt
 }
 
 export interface MetricScorecardProps {
@@ -221,6 +233,7 @@ export interface MetricScorecardProps {
   className?: string;
   savedState?: MetricData | null;
   onSave?: (data: MetricData) => void;
+  isExport?: boolean;
 }
 
 export interface SmartTableBlockProps {
@@ -228,6 +241,7 @@ export interface SmartTableBlockProps {
   savedState?: TableConfig | null;
   onSave?: (config: TableConfig) => void;
   className?: string;
+  isExport?: boolean;
 }
 
 export interface SmartChartBlockProps {
@@ -236,6 +250,7 @@ export interface SmartChartBlockProps {
   config: ReportConfig;
   savedState?: ChartData | null;
   onSave?: (data: ChartData) => void;
+  isExport?: boolean;
 }
 
 export interface SmartInsightBlockProps {
@@ -245,6 +260,9 @@ export interface SmartInsightBlockProps {
   config: ReportConfig;
   savedState?: string | null;
   onSave?: (content: string) => void;
+  contextData?: any; // Data to auto-analyze
+  contextType?: string; // Type of data (e.g., 'instagram_summary', 'growth_analysis')
+  isExport?: boolean;
 }
 
 export interface LayoutProps {
@@ -253,6 +271,9 @@ export interface LayoutProps {
   onTitleChange?: (title: string) => void;
   data?: Record<string, any>;
   onUpdate?: (key: string, value: any) => void;
+  currentPage?: number;
+  totalPages?: number;
+  isExport?: boolean;
 }
 
 export interface ReportCoverVisualProps {
@@ -263,6 +284,9 @@ export interface ReportCoverVisualProps {
 export interface InstagramDashboardSlideProps {
   config: ReportConfig;
   isThumbnail?: boolean;
+  currentPage?: number;
+  totalPages?: number;
+  isExport?: boolean;
 }
 
 export interface PlaceholderSlideProps {

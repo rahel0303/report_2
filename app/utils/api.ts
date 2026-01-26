@@ -1,30 +1,38 @@
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
 // --- GEMINI API HELPER ---
 export const generateGeminiContent = async (
   prompt: string,
-  systemInstruction: string = ''
+  systemInstruction: string = '',
+  model: string = 'gemini-2.5-flash-lite',
 ): Promise<string> => {
-  const apiKey = ''; // Runtime environment provides this
+  // Try to get API key from environment or localStorage
+  const apiKey =
+    process.env.NEXT_PUBLIC_GEMINI_API_KEY ||
+    (typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') : null) ||
+    'AIzaSyBo1HRwT6xSPydfqTzlRbpmFnM2baGlf_o'; // Fallback key
+
+  if (!apiKey || apiKey === '') {
+    return 'API key not configured. Please add your Gemini API key.';
+  }
+
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          systemInstruction: { parts: [{ text: systemInstruction }] },
-        }),
-      }
-    );
+    // Initialize GoogleGenerativeAI with API key
+    const genAI = new GoogleGenerativeAI(apiKey);
 
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status}`);
-    }
+    // Combine systemInstruction with prompt
+    const fullPrompt = systemInstruction
+      ? `${systemInstruction}\n\nUser request: ${prompt}`
+      : prompt;
 
-    const data = await response.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || 'Analysis unavailable.';
+    // Generate content using the SDK
+    const generativeModel = genAI.getGenerativeModel({ model });
+    const result = await generativeModel.generateContent(fullPrompt);
+    const response = await result.response;
+
+    return response.text() || 'Analysis unavailable.';
   } catch (error) {
     console.error('Gemini API Error:', error);
-    return 'Unable to connect to AI service. Please try again.';
+    return `Unable to connect to AI service: ${error instanceof Error ? error.message : 'Please try again.'}`;
   }
 };

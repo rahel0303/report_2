@@ -1,6 +1,6 @@
 import React from 'react';
 import { LayoutProps } from '@/app/types';
-import { EditableSlideTitle } from '@/app/components/ui';
+import { EditableSlideTitle, SlideFooter } from '@/app/components/ui';
 import { SmartChartBlock } from '@/app/components/charts';
 import { SmartInsightBlock } from '@/app/components/insights';
 import { SmartTableBlock } from '@/app/components/tables';
@@ -12,7 +12,11 @@ export const LayoutDashboard: React.FC<LayoutProps> = ({
   onTitleChange = () => {},
   data = {},
   onUpdate = () => {},
+  currentPage = 1,
+  totalPages = 1,
+  isExport = false,
 }) => {
+  console.log('📊 LayoutDashboard received config:', { clientName: config.clientName, period: config.period });
   const isDark = config.theme.type === 'dark';
   const styles = {
     bg: config.theme.colors[0],
@@ -22,7 +26,7 @@ export const LayoutDashboard: React.FC<LayoutProps> = ({
 
   return (
     <div
-      className="w-full h-full flex flex-col p-6 gap-3"
+      className="w-full h-full flex flex-col p-6 gap-3 pb-16 relative"
       style={{ fontFamily: config.font.name, backgroundColor: styles.bg }}
     >
       <div
@@ -61,6 +65,8 @@ export const LayoutDashboard: React.FC<LayoutProps> = ({
             config={config}
             savedState={data.insights}
             onSave={(val) => onUpdate('insights', val)}
+            contextData={data}
+            contextType="dashboard_summary"
           />
         </div>
       </div>
@@ -71,8 +77,18 @@ export const LayoutDashboard: React.FC<LayoutProps> = ({
           savedState={data.table_block}
           onSave={(val) => onUpdate('table_block', val)}
           className="w-full h-full"
+          isExport={isExport}
         />
       </div>
+
+      <SlideFooter
+        clientName={config.clientName}
+        period={config.period}
+        currentPage={currentPage}
+        totalPages={totalPages}
+        logo={config.coverDesign?.logoData}
+        brandColor={config.theme.brandColor}
+      />
     </div>
   );
 };

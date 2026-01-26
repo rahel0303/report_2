@@ -34,12 +34,32 @@ import {
   renderTextWithHighlights,
 } from '@/app/utils/helpers';
 import { generateGeminiContent } from '@/app/utils/api';
+import { SlideFooter } from '@/app/components/ui';
 
 export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = ({
   config,
   isThumbnail = false,
+  currentPage = 1,
+  totalPages = 1,
+  isExport = false,
 }) => {
   const isDark = config.theme.type === 'dark';
+
+  // Font sizes - much larger for export
+  const fontSize = {
+    title: isExport ? 'text-2xl' : 'text-lg',
+    subtitle: isExport ? 'text-lg' : 'text-xs',
+    metric: isExport ? 'text-5xl' : 'text-3xl',
+    metricLabel: isExport ? 'text-base' : 'text-[10px]',
+    metricChange: isExport ? 'text-base' : 'text-[10px]',
+    sectionHeader: isExport ? 'text-xl' : 'text-xs',
+    tableHeader: isExport ? 'text-base' : 'text-[9px]',
+    tableHeaderSmall: isExport ? 'text-sm' : 'text-[8px]',
+    tableCell: isExport ? 'text-base' : 'text-[9px]',
+    insightText: isExport ? 'text-lg' : 'text-[10px]',
+    buttonText: isExport ? 'text-base' : 'text-[10px]',
+    chartLabel: isExport ? 'text-base' : 'text-xs',
+  };
 
   const styles = {
     bg: config.theme.colors[0],
@@ -100,7 +120,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
         .sort((a, b) => b.followers - a.followers)
         .slice(0, 3)
         .map((d) => d.date),
-    [chartData]
+    [chartData],
   );
 
   const top3Reach = useMemo(
@@ -109,7 +129,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
         .sort((a, b) => b.reach - a.reach)
         .slice(0, 3)
         .map((d) => d.date),
-    [chartData]
+    [chartData],
   );
 
   const CustomizedDot = (props: any) => {
@@ -277,20 +297,20 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
   }) => (
     <div className="flex flex-col justify-center">
       <span
-        className={`text-[10px] font-bold uppercase tracking-wider ${styles.textMuted}`}
+        className={`${fontSize.metricLabel} font-bold uppercase tracking-wider ${styles.textMuted}`}
         style={{ fontFamily: config.font.name }}
       >
         {label}
       </span>
       <div className="flex items-baseline gap-2 mt-1">
         <span
-          className={`text-xl font-bold leading-none ${styles.textMain}`}
+          className={`${fontSize.metric} font-bold leading-none ${styles.textMain}`}
           style={{ fontFamily: config.font.name }}
         >
           {value}
         </span>
         <div
-          className={`flex items-center text-[10px] font-bold ${
+          className={`flex items-center ${fontSize.metricChange} font-bold ${
             trend === 'up' ? 'text-emerald-500' : 'text-rose-500'
           }`}
         >
@@ -303,7 +323,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
 
   return (
     <div
-      className="w-full h-full flex flex-col overflow-hidden transition-colors duration-300"
+      className="w-full h-full flex flex-col overflow-hidden transition-colors duration-300 pb-16 relative"
       style={{ fontFamily: config.font.name, backgroundColor: styles.bg }}
     >
       <header
@@ -315,11 +335,13 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
             <Activity size={20} style={{ color: colorPrimary }} />
           </div>
           <div>
-            <h1 className={`text-xl font-bold tracking-tight leading-none ${styles.textMain}`}>
+            <h1
+              className={`${fontSize.title} font-bold tracking-tight leading-none ${styles.textMain}`}
+            >
               Instagram Performance
             </h1>
             <p
-              className={`text-[10px] font-medium flex items-center gap-1 mt-1 uppercase tracking-wide ${styles.textMuted}`}
+              className={`${fontSize.metricChange} font-medium flex items-center gap-1 mt-1 uppercase tracking-wide ${styles.textMuted}`}
             >
               <Calendar size={10} /> {config.period} Report
             </p>
@@ -354,10 +376,12 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
             style={{ backgroundColor: styles.cardBg }}
           >
             <div className="flex justify-between items-center mb-1">
-              <h3 className={`text-xs font-bold flex items-center gap-2 ${styles.textMain}`}>
+              <h3
+                className={`${fontSize.sectionHeader} font-bold flex items-center gap-2 ${styles.textMain}`}
+              >
                 Daily Trends (Reach vs Growth)
               </h3>
-              <div className={`flex gap-3 text-[10px] font-medium ${styles.textMuted}`}>
+              <div className={`flex gap-3 ${fontSize.chartLabel} font-medium ${styles.textMuted}`}>
                 <span className="flex items-center gap-1">
                   <div
                     className="w-2 h-2 rounded-full"
@@ -470,7 +494,9 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
             >
               <div className="flex items-center gap-2">
                 <Key size={16} className={styles.textMuted} />
-                <h3 className={`text-[12px] font-bold uppercase tracking-wide ${styles.textMain}`}>
+                <h3
+                  className={`${fontSize.sectionHeader} font-bold uppercase tracking-wide ${styles.textMain}`}
+                >
                   Key Takeaways
                 </h3>
               </div>
@@ -487,7 +513,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
 
                   <button
                     onClick={() => setIsAiOpen(!isAiOpen)}
-                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border ${
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full ${fontSize.buttonText} font-medium transition-all border ${
                       isAiOpen ? styles.aiButtonActive : styles.aiButtonInactive
                     }`}
                   >
@@ -512,7 +538,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
                     value={aiPrompt}
                     onChange={(e) => setAiPrompt(e.target.value)}
                     placeholder="Try: 'Focus on growth'..."
-                    className={`flex-1 text-[10px] px-2 py-1 rounded border focus:outline-none focus:border-indigo-400 placeholder:opacity-50 ${styles.aiInputBg}`}
+                    className={`flex-1 ${fontSize.buttonText} px-2 py-1 rounded border focus:outline-none focus:border-indigo-400 placeholder:opacity-50 ${styles.aiInputBg}`}
                     autoFocus
                   />
                   <button
@@ -530,7 +556,9 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
               {isTyping ? (
                 <div className="flex flex-col items-center justify-center h-full gap-2 opacity-70">
                   <Sparkles size={20} className="text-indigo-500 animate-spin" />
-                  <span className="text-[10px] text-indigo-500 font-medium animate-pulse">
+                  <span
+                    className={`${fontSize.buttonText} text-indigo-500 font-medium animate-pulse`}
+                  >
                     Analyzing Data...
                   </span>
                 </div>
@@ -538,18 +566,18 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
                 <>
                   {isParagraphMode ? (
                     <div
-                      className={`text-[10px] leading-relaxed font-medium text-justify ${styles.textMuted}`}
+                      className={`${fontSize.insightText} leading-relaxed font-medium text-justify ${styles.textMuted}`}
                     >
                       {renderTextWithHighlights(takeaways[0], isDark, colorPrimary)}
                     </div>
                   ) : (
                     <ul
-                      className={`space-y-2 text-[10px] leading-tight font-medium ${styles.textMuted}`}
+                      className={`space-y-2 ${fontSize.insightText} leading-tight font-medium ${styles.textMuted}`}
                     >
                       {takeaways.map((item, idx) => (
                         <li key={idx} className="flex gap-2 items-start">
                           <span
-                            className="text-[10px] mt-[2px]"
+                            className={`${fontSize.insightText} mt-[2px]`}
                             style={{ color: config.theme.colors[4] }}
                           >
                             •
@@ -577,14 +605,14 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
               >
                 <tr>
                   <th
-                    className={`px-1 py-2 text-left text-[9px] font-bold uppercase tracking-wider border-b border-r w-16 ${styles.border} ${styles.textMuted}`}
+                    className={`px-1 py-2 text-left ${fontSize.tableHeader} font-bold uppercase tracking-wider border-b border-r w-16 ${styles.border} ${styles.textMuted}`}
                   >
                     Month
                   </th>
                   {columns.map((col) => (
                     <th
                       key={col.key}
-                      className={`px-1 py-2 text-[8px] font-bold uppercase tracking-tighter border-b border-r last:border-r-0 leading-tight break-words w-[7%] ${styles.border} ${styles.textMuted}`}
+                      className={`px-1 py-2 ${fontSize.tableHeaderSmall} font-bold uppercase tracking-tighter border-b border-r last:border-r-0 leading-tight break-words w-[7%] ${styles.border} ${styles.textMuted}`}
                     >
                       {col.label}
                     </th>
@@ -594,14 +622,14 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
               <tbody className={`divide-y ${isDark ? 'divide-white/5' : 'divide-slate-50'}`}>
                 <tr className={`transition-colors ${styles.tableRowHover}`}>
                   <td
-                    className={`px-1 py-1.5 text-left text-[9px] font-bold border-r ${styles.border} ${styles.textMuted}`}
+                    className={`px-1 py-1.5 text-left ${fontSize.tableCell} font-bold border-r ${styles.border} ${styles.textMuted}`}
                   >
                     {summaryData.previous.label}
                   </td>
                   {columns.map((col) => (
                     <td
                       key={`prev-${col.key}`}
-                      className={`px-1 py-1.5 text-[9px] border-r font-mono truncate ${styles.border} ${styles.textMuted}`}
+                      className={`px-1 py-1.5 ${fontSize.tableCell} border-r font-mono truncate ${styles.border} ${styles.textMuted}`}
                     >
                       {formatNumber((summaryData.previous as any)[col.key], col.isPercent)}
                     </td>
@@ -609,14 +637,14 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
                 </tr>
                 <tr className={`transition-colors ${styles.tableRowHover}`}>
                   <td
-                    className={`px-1 py-1.5 text-left text-[9px] font-bold border-r ${styles.border} ${styles.textMain}`}
+                    className={`px-1 py-1.5 text-left ${fontSize.tableCell} font-bold border-r ${styles.border} ${styles.textMain}`}
                   >
                     {summaryData.current.label}
                   </td>
                   {columns.map((col) => (
                     <td
                       key={`curr-${col.key}`}
-                      className={`px-1 py-1.5 text-[9px] font-bold border-r font-mono truncate ${styles.border} ${styles.textMain}`}
+                      className={`px-1 py-1.5 ${fontSize.tableCell} font-bold border-r font-mono truncate ${styles.border} ${styles.textMain}`}
                     >
                       {formatNumber((summaryData.current as any)[col.key], col.isPercent)}
                     </td>
@@ -627,7 +655,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
                   style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#f0f9ff' }}
                 >
                   <td
-                    className="px-1 py-1.5 text-left text-[9px] font-bold border-r"
+                    className={`px-1 py-1.5 text-left ${fontSize.tableCell} font-bold border-r`}
                     style={{
                       color: colorPrimary,
                       borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
@@ -638,13 +666,13 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
                   {columns.map((col) => {
                     const rawGap = calculateGap(
                       (summaryData.current as any)[col.key],
-                      (summaryData.previous as any)[col.key]
+                      (summaryData.previous as any)[col.key],
                     );
                     const isPositive = !rawGap.startsWith('-');
                     return (
                       <td
                         key={`gap-${col.key}`}
-                        className={`px-1 py-1.5 text-[9px] font-bold border-r font-mono truncate ${
+                        className={`px-1 py-1.5 ${fontSize.tableCell} font-bold border-r font-mono truncate ${
                           isPositive ? 'text-emerald-500' : 'text-rose-500'
                         }`}
                         style={{ borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0' }}
@@ -659,6 +687,17 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
           </div>
         </div>
       </div>
+
+      {!isThumbnail && (
+        <SlideFooter
+          clientName={config.clientName}
+          period={config.period}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          logo={config.coverDesign?.logoData}
+          brandColor={config.theme.brandColor}
+        />
+      )}
     </div>
   );
 };

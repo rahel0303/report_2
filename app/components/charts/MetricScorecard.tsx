@@ -8,6 +8,7 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
   className,
   savedState,
   onSave,
+  isExport = false,
 }) => {
   const [data, setData] = useState<MetricData | null>(savedState || null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -21,6 +22,15 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
     cardBg: isDark ? 'rgba(255,255,255,0.05)' : '#ffffff',
     textMain: isDark ? 'text-white' : 'text-slate-900',
     textMuted: isDark ? 'text-slate-400' : 'text-slate-500',
+  };
+
+  // Font sizes for export
+  const fontSize = {
+    label: isExport ? 'text-base' : 'text-[10px]',
+    value: isExport ? 'text-5xl' : 'text-3xl',
+    trend: isExport ? 'text-base' : 'text-[10px]',
+    caption: isExport ? 'text-base' : 'text-[9px]',
+    emptyState: isExport ? 'text-lg' : 'text-[10px]',
   };
 
   const handleSelect = (metric: Metric) => {
@@ -66,7 +76,9 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
               size={24}
               className="mb-2 opacity-50 group-hover:scale-110 transition-transform"
             />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Add Metric</span>
+            <span className={`${fontSize.emptyState} font-bold uppercase tracking-wider`}>
+              Add Metric
+            </span>
           </div>
         </div>
         <MetricSelectionModal
@@ -90,7 +102,7 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
       >
         <div className="flex justify-between items-start">
           <span
-            className={`text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 ${styles.textMuted}`}
+            className={`${fontSize.label} font-bold uppercase tracking-wider flex items-center gap-1.5 ${styles.textMuted}`}
           >
             <Activity size={12} />
             {data.label}
@@ -102,7 +114,7 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
 
         <div className="mt-2">
           <span
-            className={`text-3xl font-bold tracking-tight ${styles.textMain}`}
+            className={`${fontSize.value} font-bold tracking-tight ${styles.textMain}`}
             style={{ fontFamily: config.font.name }}
           >
             {data.value}
@@ -111,7 +123,7 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
 
         <div className="mt-2 flex items-center gap-2">
           <div
-            className={`flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+            className={`flex items-center ${fontSize.trend} font-bold px-1.5 py-0.5 rounded-full ${
               data.trend === 'up'
                 ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10 dark:text-emerald-400'
                 : 'text-rose-600 bg-rose-50 dark:bg-rose-500/10 dark:text-rose-400'
@@ -120,7 +132,7 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
             {data.trend === 'up' ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
             <span>{data.trendValue}</span>
           </div>
-          <span className={`text-[9px] ${styles.textMuted}`}>vs last period</span>
+          <span className={`${fontSize.caption} ${styles.textMuted}`}>vs last period</span>
         </div>
       </div>
 

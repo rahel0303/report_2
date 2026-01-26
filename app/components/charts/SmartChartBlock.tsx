@@ -30,6 +30,7 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
   config,
   savedState,
   onSave,
+  isExport = false,
 }) => {
   const [chartType, setChartType] = useState<ChartType | null>(savedState?.type || null);
   const [settings, setSettings] = useState(savedState?.settings || {});
@@ -48,6 +49,13 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
 
   const isDark = config.theme.type === 'dark';
   const colorPrimary = config.theme.brandColor;
+
+  // Font sizes for export
+  const fontSize = {
+    title: isExport ? 'text-xl' : 'text-xs',
+    axisLabel: isExport ? 14 : 11,
+    legendText: isExport ? 16 : 12,
+  };
   const chartColors = config.theme.colors.slice(1);
 
   const handleSelect = (type: ChartType | string, extraSettings = {}) => {
@@ -72,7 +80,7 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
       { name: 'May', val: 1890, val2: 4800 },
       { name: 'Jun', val: 2390, val2: 3800 },
     ],
-    []
+    [],
   );
 
   const pieData: PieChartDataPoint[] = useMemo(
@@ -82,7 +90,7 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
       { name: 'Viral', value: 300 },
       { name: 'Direct', value: 200 },
     ],
-    []
+    [],
   );
 
   const postsData: PostData[] = useMemo(
@@ -92,7 +100,7 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
         reach: 12000 + i * 1500,
         eng: 450 + i * 50,
       })),
-    [settings.count]
+    [settings.count],
   );
 
   const renderContent = () => {
@@ -105,7 +113,11 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
     }
 
     const ChartWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-      <div className="w-full h-full flex flex-col bg-white dark:bg-slate-800 rounded-lg overflow-hidden relative group">
+      <div
+        className={`w-full h-full flex flex-col rounded-lg overflow-hidden relative group ${
+          isDark ? 'bg-slate-800' : 'bg-white'
+        }`}
+      >
         <div
           className={`shrink-0 px-3 py-2 border-b flex justify-between items-center ${
             isDark ? 'border-slate-700 bg-slate-800' : 'border-slate-100 bg-slate-50/50'
@@ -163,8 +175,8 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
               settings.count === 2
                 ? 'grid-cols-2'
                 : settings.count === 3
-                ? 'grid-cols-3'
-                : 'grid-cols-2 grid-rows-2'
+                  ? 'grid-cols-3'
+                  : 'grid-cols-2 grid-rows-2'
             }`}
           >
             {postsData.map((post, i) => (
@@ -174,10 +186,14 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
                   isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'
                 }`}
               >
-                <div className="flex-1 bg-slate-100/50 flex items-center justify-center">
+                <div
+                  className={`flex-1 flex items-center justify-center ${
+                    isDark ? 'bg-slate-700/50' : 'bg-slate-100/50'
+                  }`}
+                >
                   <ImageIconLucide className="text-slate-300" size={20} />
                 </div>
-                <div className="p-2 border-t border-slate-100 dark:border-slate-700">
+                <div className={`p-2 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                   <div className="flex justify-between text-[8px] mb-1">
                     <span className="text-slate-400">Reach</span>
                     <span className={`font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>
@@ -200,150 +216,166 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
 
     return (
       <ChartWrapper>
-        <ResponsiveContainer width="100%" height="100%">
-          {chartType === 'line' ? (
-            <LineChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke={isDark ? '#334155' : '#e2e8f0'}
-                vertical={false}
-              />
-              <XAxis
-                dataKey="name"
-                tick={{ fontSize: 10, fill: isDark ? '#94a3b8' : '#64748b' }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: isDark ? '#94a3b8' : '#64748b' }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <Tooltip
-                contentStyle={{
-                  fontSize: '10px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                }}
-              />
-              <Line
-                type="monotone"
-                dataKey="val"
-                stroke={colorPrimary}
-                strokeWidth={2}
-                dot={{ r: 3 }}
-              />
-              <Line
-                type="monotone"
-                dataKey="val2"
-                stroke={chartColors[1]}
-                strokeWidth={2}
-                dot={{ r: 3 }}
-              />
-            </LineChart>
-          ) : chartType === 'column' ? (
-            <BarChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke={isDark ? '#334155' : '#e2e8f0'}
-                vertical={false}
-              />
-              <XAxis
-                dataKey="name"
-                tick={{ fontSize: 10, fill: isDark ? '#94a3b8' : '#64748b' }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: isDark ? '#94a3b8' : '#64748b' }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <Tooltip
-                contentStyle={{
-                  fontSize: '10px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                }}
-              />
-              <Bar dataKey="val" fill={colorPrimary} radius={[4, 4, 0, 0]} />
-            </BarChart>
-          ) : chartType === 'bar' ? (
-            <BarChart
-              layout="vertical"
-              data={data}
-              margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
-            >
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke={isDark ? '#334155' : '#e2e8f0'}
-                horizontal={false}
-              />
-              <XAxis
-                type="number"
-                tick={{ fontSize: 10, fill: isDark ? '#94a3b8' : '#64748b' }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                dataKey="name"
-                type="category"
-                tick={{ fontSize: 10, fill: isDark ? '#94a3b8' : '#64748b' }}
-                axisLine={false}
-                tickLine={false}
-                width={30}
-              />
-              <Tooltip
-                contentStyle={{
-                  fontSize: '10px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                }}
-              />
-              <Bar dataKey="val" fill={colorPrimary} radius={[0, 4, 4, 0]} barSize={20} />
-            </BarChart>
-          ) : (
-            <PieChart margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-              <Pie
-                data={pieData}
-                cx="50%"
-                cy="50%"
-                innerRadius={0}
-                outerRadius={60}
-                paddingAngle={2}
-                dataKey="value"
-                label={({ x, y, name, percent }: any) => (
-                  <text
-                    x={x}
-                    y={y}
-                    fill={isDark ? '#e2e8f0' : '#475569'}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    style={{ fontSize: '10px', fontWeight: 'bold' }}
-                  >
-                    {`${name} ${(percent * 100).toFixed(0)}%`}
-                  </text>
-                )}
-                labelLine={false}
+        <div className={`w-full h-full ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+          <ResponsiveContainer width="100%" height="100%">
+            {chartType === 'line' ? (
+              <LineChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke={isDark ? '#334155' : '#e2e8f0'}
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: fontSize.axisLabel, fill: isDark ? '#94a3b8' : '#64748b' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: fontSize.axisLabel, fill: isDark ? '#94a3b8' : '#64748b' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    fontSize: '10px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                    backgroundColor: isDark ? '#1e293b' : '#ffffff',
+                    color: isDark ? '#e2e8f0' : '#1f2937',
+                  }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="val"
+                  stroke={colorPrimary}
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="val2"
+                  stroke={chartColors[1]}
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                />
+              </LineChart>
+            ) : chartType === 'column' ? (
+              <BarChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke={isDark ? '#334155' : '#e2e8f0'}
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: fontSize.axisLabel, fill: isDark ? '#94a3b8' : '#64748b' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: fontSize.axisLabel, fill: isDark ? '#94a3b8' : '#64748b' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    fontSize: '10px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                    backgroundColor: isDark ? '#1e293b' : '#ffffff',
+                    color: isDark ? '#e2e8f0' : '#1f2937',
+                  }}
+                />
+                <Bar dataKey="val" fill={colorPrimary} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            ) : chartType === 'bar' ? (
+              <BarChart
+                layout="vertical"
+                data={data}
+                margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
               >
-                {pieData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={chartColors[index % chartColors.length]} />
-                ))}
-              </Pie>
-              <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '8px', border: 'none' }} />
-              <Legend
-                verticalAlign="bottom"
-                height={24}
-                iconType="circle"
-                iconSize={8}
-                wrapperStyle={{ fontSize: '10px' }}
-              />
-            </PieChart>
-          )}
-        </ResponsiveContainer>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke={isDark ? '#334155' : '#e2e8f0'}
+                  horizontal={false}
+                />
+                <XAxis
+                  type="number"
+                  tick={{ fontSize: fontSize.axisLabel, fill: isDark ? '#94a3b8' : '#64748b' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  dataKey="name"
+                  type="category"
+                  tick={{ fontSize: fontSize.axisLabel, fill: isDark ? '#94a3b8' : '#64748b' }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={30}
+                />
+                <Tooltip
+                  contentStyle={{
+                    fontSize: '10px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                    backgroundColor: isDark ? '#1e293b' : '#ffffff',
+                    color: isDark ? '#e2e8f0' : '#1f2937',
+                  }}
+                />
+                <Bar dataKey="val" fill={colorPrimary} radius={[0, 4, 4, 0]} barSize={20} />
+              </BarChart>
+            ) : (
+              <PieChart margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                <Pie
+                  data={pieData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={0}
+                  outerRadius={60}
+                  paddingAngle={2}
+                  dataKey="value"
+                  label={({ x, y, name, percent }: any) => (
+                    <text
+                      x={x}
+                      y={y}
+                      fill={isDark ? '#e2e8f0' : '#475569'}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      style={{ fontSize: `${fontSize.legendText}px`, fontWeight: 'bold' }}
+                    >
+                      {`${name} ${(percent * 100).toFixed(0)}%`}
+                    </text>
+                  )}
+                  labelLine={false}
+                >
+                  {pieData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={chartColors[index % chartColors.length]} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  contentStyle={{
+                    fontSize: '10px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    backgroundColor: isDark ? '#1e293b' : '#ffffff',
+                    color: isDark ? '#e2e8f0' : '#1f2937',
+                  }}
+                />
+                <Legend
+                  verticalAlign="bottom"
+                  height={24}
+                  iconType="circle"
+                  iconSize={8}
+                  wrapperStyle={{ fontSize: '10px' }}
+                />
+              </PieChart>
+            )}
+          </ResponsiveContainer>
+        </div>
       </ChartWrapper>
     );
   };

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { PenTool, X, Check, Edit3 } from 'lucide-react';
+import { PenTool, X, Check, Edit3, Sparkles, Loader2 } from 'lucide-react';
 import { SmartInsightBlockProps } from '@/app/types';
 import { InsightMethodSelectionModal, AiPromptModal } from '@/app/components/ui';
 import { renderTextWithHighlights } from '@/app/utils/helpers';
+import { generateGeminiContent } from '@/app/utils/api';
 
 export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
   icon,
@@ -11,10 +12,14 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
   config,
   savedState,
   onSave,
+  contextData,
+  contextType,
+  isExport = false,
 }) => {
   const [content, setContent] = useState<string | null>(savedState || null);
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
     setContent(savedState || null);
@@ -22,10 +27,18 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
 
   const [showSelectionModal, setShowSelectionModal] = useState(false);
   const [showAiPromptModal, setShowAiPromptModal] = useState(false);
+  const [showRefinementModal, setShowRefinementModal] = useState(false);
 
   const isDark = config.theme.type === 'dark';
   const colorPrimary = config.theme.brandColor;
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Font sizes for export
+  const fontSize = {
+    title: isExport ? 'text-xl' : 'text-xs',
+    content: isExport ? 'text-lg' : 'text-xs',
+    listItem: isExport ? 'text-lg' : 'text-xs',
+  };
 
   const handleBlockClick = () => {
     if (content && !isEditing) {
@@ -42,15 +55,108 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
     setIsEditing(true);
   };
 
-  const handleSelectAI = () => {
+  const handleSelectAI = async () => {
     setShowSelectionModal(false);
-    setShowAiPromptModal(true);
+
+    // If we have contextData, auto-generate immediately
+    if (contextData) {
+      await autoGenerateInsight();
+    } else {
+      // Otherwise show prompt modal
+      setShowAiPromptModal(true);
+    }
+  };
+
+  const autoGenerateInsight = async () => {
+    setIsGenerating(true);
+    try {
+      let systemPrompt = '';
+      let dataPrompt = '';
+
+      // Build prompts based on context type
+      if (contextType === 'instagram_summary') {
+        systemPrompt =
+          'You are a professional social media analyst. Analyze the Instagram performance data and generate 3 concise key takeaways (bullet points). Focus on significant changes in reach, engagement, and growth. Use *bold* for key numbers. Each point should be under 50 words.';
+        dataPrompt = `Instagram Performance Data:\n${JSON.stringify(contextData, null, 2)}`;
+      } else if (contextType === 'growth_analysis') {
+        systemPrompt =
+          'You are a growth analytics expert. Analyze the growth data and provide 3 actionable insights about trends, patterns, and opportunities. Use *bold* for percentages and key metrics.';
+        dataPrompt = `Growth Analysis Data:\n${JSON.stringify(contextData, null, 2)}`;
+      } else if (contextType === 'content_performance') {
+        systemPrompt =
+          'You are a content strategist. Analyze post performance data and provide 3 strategic insights about what content performs best. Highlight top performers with *bold*.';
+        dataPrompt = `Content Performance Data:\n${JSON.stringify(contextData, null, 2)}`;
+      } else {
+        // Generic analysis
+        systemPrompt =
+          'You are a data analyst. Provide 3 professional insights based on the data below. Use *bold* for emphasis on key findings.';
+        dataPrompt = `Data:\n${JSON.stringify(contextData, null, 2)}`;
+      }
+
+      const fullPrompt = `${dataPrompt}\n\nProvide 3 bullet points (start each with '-' or '*'). Keep each point concise and actionable.`;
+
+      let result = await generateGeminiContent(fullPrompt, systemPrompt);
+
+      // Clean AI response - remove intro/outro text
+      result = result
+        .replace(/^(Tentu|Sure|Berikut|Here|Okay)[^\n]*\n*/gi, '')
+        .replace(/^[^-*]*?((?=-)|(?=\*))/, '')
+        .trim();
+
+      // Parse bullet points
+      const lines = result
+        .split('\n')
+        .filter((line) => line.trim().startsWith('-') || line.trim().startsWith('*'))
+        .map((l) => l.replace(/^[-*]\s*/, ''));
+
+      if (lines.length > 0) {
+        const generatedText = lines.join('\n');
+        setEditValue(generatedText);
+        setIsEditing(true);
+      } else {
+        // If no bullet points found, use the whole result
+        setEditValue(result);
+        setIsEditing(true);
+      }
+    } catch (error) {
+      console.error('AI generation failed:', error);
+      alert('Failed to generate insights. Please try manual entry.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleAiGenerated = (generatedText: string) => {
     setShowAiPromptModal(false);
     setEditValue(generatedText);
     setIsEditing(true);
+  };
+
+  const handleRefineWithAI = async (refinementPrompt: string) => {
+    setShowRefinementModal(false);
+    setIsGenerating(true);
+
+    try {
+      const systemPrompt =
+        "You are a professional content editor. Modify the existing content based on the user's instructions. Maintain the core information but adjust the format, style, or structure as requested. Use *bold* for emphasis. Return ONLY the refined content without any intro text.";
+      const fullPrompt = `Current content:\n${content}\n\nUser instruction: ${refinementPrompt}\n\nProvide ONLY the refined version without any intro text:`;
+
+      let result = await generateGeminiContent(fullPrompt, systemPrompt);
+
+      // Clean AI response - remove common intro phrases
+      result = result
+        .replace(/^(Tentu|Sure|Berikut|Here|Okay|Here is|Here's|Berikut adalah)[^\n]*\n*/gi, '')
+        .replace(/^[^:]*:\s*/g, '')
+        .trim();
+
+      setContent(result);
+      if (onSave) onSave(result);
+    } catch (error) {
+      console.error('AI refinement failed:', error);
+      alert('Failed to refine content. Please try manual editing.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleSave = () => {
@@ -64,7 +170,7 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
       inputRef.current.focus();
       inputRef.current.setSelectionRange(
         inputRef.current.value.length,
-        inputRef.current.value.length
+        inputRef.current.value.length,
       );
     }
   }, [isEditing]);
@@ -72,7 +178,27 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
   return (
     <>
       <div className="h-full w-full group relative">
-        {isEditing ? (
+        {isGenerating ? (
+          <div
+            className={`h-full w-full rounded-lg border flex flex-col items-center justify-center gap-3 animate-in fade-in duration-200 ${
+              isDark ? 'bg-slate-800 border-purple-500/50' : 'bg-purple-50 border-purple-300'
+            }`}
+          >
+            <Loader2 size={24} className="animate-spin text-purple-500" />
+            <div className="text-center">
+              <p
+                className={`${fontSize.title} font-bold ${isDark ? 'text-purple-300' : 'text-purple-700'}`}
+              >
+                AI is analyzing your data...
+              </p>
+              <p
+                className={`${fontSize.content} mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+              >
+                Generating insights
+              </p>
+            </div>
+          </div>
+        ) : isEditing ? (
           <div
             className={`h-full w-full rounded-lg border flex flex-col relative animate-in fade-in duration-200 ring-2 ring-blue-500/20 ${
               isDark ? 'bg-slate-800 border-blue-500/50' : 'bg-white border-blue-400'
@@ -83,7 +209,9 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
                 isDark ? 'border-slate-700' : 'border-slate-100'
               }`}
             >
-              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500 flex items-center gap-1">
+              <span
+                className={`${fontSize.content} font-bold uppercase tracking-wider text-blue-500 flex items-center gap-1`}
+              >
                 <PenTool size={10} /> Editing...
               </span>
             </div>
@@ -91,7 +219,7 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
               ref={inputRef}
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
-              className={`flex-1 w-full p-3 resize-none text-[10px] leading-relaxed outline-none bg-transparent ${
+              className={`flex-1 w-full p-3 resize-none ${fontSize.content} leading-relaxed outline-none bg-transparent ${
                 isDark
                   ? 'text-white placeholder:text-slate-600'
                   : 'text-slate-800 placeholder:text-slate-400'
@@ -128,13 +256,27 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
                 <div className="flex justify-between items-start mb-2 opacity-50">
                   <div className="flex items-center gap-1.5">
                     {icon && React.createElement(icon, { size: 12 })}
-                    <span className="font-bold uppercase tracking-wider text-[9px]">{label}</span>
+                    <span className={`font-bold uppercase tracking-wider ${fontSize.content}`}>
+                      {label}
+                    </span>
                   </div>
-                  <div className="flex gap-1">
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowRefinementModal(true);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity hover:text-purple-500"
+                      title="Refine with AI"
+                    >
+                      <Sparkles size={12} />
+                    </button>
                     <Edit3 size={12} />
                   </div>
                 </div>
-                <div className="text-[10px] leading-relaxed whitespace-pre-wrap font-medium">
+                <div
+                  className={`${fontSize.content} leading-relaxed whitespace-pre-wrap font-medium`}
+                >
                   {renderTextWithHighlights(content, isDark, colorPrimary)}
                 </div>
               </div>
@@ -147,7 +289,9 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
                     size: 24,
                     className: 'mb-2 opacity-50 group-hover:scale-110 transition-transform',
                   })}
-                <span className="text-[10px] font-bold uppercase tracking-wider">{label}</span>
+                <span className={`${fontSize.content} font-bold uppercase tracking-wider`}>
+                  {label}
+                </span>
               </div>
             )}
           </div>
@@ -166,6 +310,15 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
         isOpen={showAiPromptModal}
         onClose={() => setShowAiPromptModal(false)}
         onGenerate={handleAiGenerated}
+        config={config}
+        contextData={contextData}
+        contextType={contextType}
+      />
+
+      <AiPromptModal
+        isOpen={showRefinementModal}
+        onClose={() => setShowRefinementModal(false)}
+        onGenerate={handleRefineWithAI}
         config={config}
       />
     </>

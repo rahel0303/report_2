@@ -6,3 +6,4 @@ export { TableSelectionModal } from './TableSelectionModal';
 export { ChartSelectionModal } from './ChartSelectionModal';
 export { InsightMethodSelectionModal } from './InsightMethodSelectionModal';
 export { AiPromptModal } from './AiPromptModal';
+export { SlideFooter } from './SlideFooter';

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { LayoutProps, Post } from '@/app/types';
-import { EditableSlideTitle } from '@/app/components/ui';
+import { EditableSlideTitle, SlideFooter } from '@/app/components/ui';
 import { SmartInsightBlock } from '@/app/components/insights';
 import { Sparkles, ExternalLink, Image as ImageIcon } from 'lucide-react';
 
@@ -10,6 +10,9 @@ export const LayoutContent: React.FC<LayoutProps> = ({
   onTitleChange = () => {},
   data = {},
   onUpdate = () => {},
+  currentPage = 1,
+  totalPages = 1,
+  isExport = false,
 }) => {
   const isDark = config.theme.type === 'dark';
   const styles = {
@@ -55,7 +58,7 @@ export const LayoutContent: React.FC<LayoutProps> = ({
 
   return (
     <div
-      className="w-full h-full flex flex-col p-6 gap-4"
+      className="w-full h-full flex flex-col p-6 gap-4 pb-16 relative"
       style={{ fontFamily: config.font.name, backgroundColor: styles.bg }}
     >
       <div className={`shrink-0 border-b flex items-center justify-between pb-2 ${styles.border}`}>
@@ -172,8 +175,20 @@ export const LayoutContent: React.FC<LayoutProps> = ({
           config={config}
           savedState={data.insight}
           onSave={(val) => onUpdate('insight', val)}
+          contextData={data}
+          contextType="content_performance"
+          isExport={isExport}
         />
       </div>
+
+      <SlideFooter
+        clientName={config.clientName}
+        period={config.period}
+        currentPage={currentPage}
+        totalPages={totalPages}
+        logo={config.coverDesign?.logoData}
+        brandColor={config.theme.brandColor}
+      />
     </div>
   );
 };

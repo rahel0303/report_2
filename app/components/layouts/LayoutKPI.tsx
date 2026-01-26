@@ -1,6 +1,6 @@
 import React from 'react';
 import { LayoutProps } from '@/app/types';
-import { EditableSlideTitle } from '@/app/components/ui';
+import { EditableSlideTitle, SlideFooter } from '@/app/components/ui';
 import { MetricScorecard, SmartChartBlock } from '@/app/components/charts';
 import { SmartInsightBlock } from '@/app/components/insights';
 import { Sparkles } from 'lucide-react';
@@ -11,6 +11,9 @@ export const LayoutKPI: React.FC<LayoutProps> = ({
   onTitleChange = () => {},
   data = {},
   onUpdate = () => {},
+  currentPage = 1,
+  totalPages = 1,
+  isExport = false,
 }) => {
   const isDark = config.theme.type === 'dark';
   const styles = {
@@ -21,7 +24,7 @@ export const LayoutKPI: React.FC<LayoutProps> = ({
 
   return (
     <div
-      className="w-full h-full flex flex-col p-6 gap-4"
+      className="w-full h-full flex flex-col p-6 gap-4 pb-16 relative"
       style={{ fontFamily: config.font.name, backgroundColor: styles.bg }}
     >
       <div className={`h-[10%] shrink-0 border-b flex items-end pb-4 ${styles.border}`}>
@@ -35,6 +38,7 @@ export const LayoutKPI: React.FC<LayoutProps> = ({
               config={config}
               savedState={data[`metric_${i}`]}
               onSave={(val) => onUpdate(`metric_${i}`, val)}
+              isExport={isExport}
             />
           </div>
         ))}
@@ -50,6 +54,7 @@ export const LayoutKPI: React.FC<LayoutProps> = ({
             config={config}
             savedState={data.main_chart}
             onSave={(val) => onUpdate('main_chart', val)}
+            isExport={isExport}
           />
         </div>
         <div
@@ -63,9 +68,21 @@ export const LayoutKPI: React.FC<LayoutProps> = ({
             config={config}
             savedState={data.summary}
             onSave={(val) => onUpdate('summary', val)}
+            contextData={data}
+            contextType="kpi_summary"
+            isExport={isExport}
           />
         </div>
       </div>
+
+      <SlideFooter
+        clientName={config.clientName}
+        period={config.period}
+        currentPage={currentPage}
+        totalPages={totalPages}
+        logo={config.coverDesign?.logoData}
+        brandColor={config.theme.brandColor}
+      />
     </div>
   );
 };
