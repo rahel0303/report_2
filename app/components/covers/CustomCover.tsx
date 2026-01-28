@@ -25,6 +25,7 @@ export const CustomCover: React.FC<CustomCoverProps> = ({ config }) => {
     title: config.reportTitle,
     subtitle: config.reportDetails,
     period: config.period,
+    fontFamily: config.font.name,
   };
 
   switch (templateId) {

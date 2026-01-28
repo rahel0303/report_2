@@ -58,6 +58,7 @@ interface CoverDesignerProps {
   initialTitle?: string;
   initialSubtitle?: string;
   initialPeriod?: string;
+  fontFamily?: string;
 }
 
 export const CoverDesigner: React.FC<CoverDesignerProps> = ({
@@ -65,6 +66,7 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
   initialTitle,
   initialSubtitle,
   initialPeriod,
+  fontFamily = 'Inter',
 }) => {
   const [logoFile, setLogoFile] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<LogoAnalysis | null>(null);
@@ -136,6 +138,7 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
       title,
       subtitle,
       period,
+      fontFamily,
     };
 
     switch (templateId) {

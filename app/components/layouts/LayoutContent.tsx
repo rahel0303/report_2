@@ -31,10 +31,11 @@ export const LayoutContent: React.FC<LayoutProps> = ({
   const setFilterType = (val: string) => onUpdate('filterType', val);
 
   const posts = useMemo(() => {
+    const images = ['/1.png', '/2.png', '/3.png', '/4.png', '/5.png'];
     const dummy: Post[] = Array.from({ length: 24 })
       .map((_, i) => ({
         id: i,
-        image: null,
+        image: images[i % images.length],
         reach: Math.floor(Math.random() * 50000) + 1000,
         engagement: Math.floor(Math.random() * 5000) + 100,
         get er() {
@@ -109,11 +110,19 @@ export const LayoutContent: React.FC<LayoutProps> = ({
             className={`rounded-xl border overflow-hidden flex flex-col shadow-sm ${styles.border}`}
             style={{ backgroundColor: styles.cardBg }}
           >
-            <div className="relative flex-1 bg-slate-50/50 flex items-center justify-center min-h-0 overflow-hidden group">
-              <ImageIcon
-                size={28}
-                className="text-slate-300 group-hover:scale-110 transition-transform"
-              />
+            <div className="relative aspect-square bg-slate-50/50 flex items-center justify-center overflow-hidden group">
+              {post.image ? (
+                <img
+                  src={post.image}
+                  alt={`Post ${post.id}`}
+                  className="w-full h-full object-fill group-hover:scale-105 transition-transform duration-300"
+                />
+              ) : (
+                <ImageIcon
+                  size={28}
+                  className="text-slate-300 group-hover:scale-110 transition-transform"
+                />
+              )}
 
               {filterType === 'mixed' && (
                 <div

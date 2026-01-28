@@ -130,6 +130,7 @@ export interface PostData {
   id: number;
   reach: number;
   eng: number;
+  image?: string;
 }
 
 // Dashboard Data Types

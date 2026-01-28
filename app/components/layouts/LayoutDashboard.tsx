@@ -16,7 +16,10 @@ export const LayoutDashboard: React.FC<LayoutProps> = ({
   totalPages = 1,
   isExport = false,
 }) => {
-  console.log('📊 LayoutDashboard received config:', { clientName: config.clientName, period: config.period });
+  console.log('📊 LayoutDashboard received config:', {
+    clientName: config.clientName,
+    period: config.period,
+  });
   const isDark = config.theme.type === 'dark';
   const styles = {
     bg: config.theme.colors[0],

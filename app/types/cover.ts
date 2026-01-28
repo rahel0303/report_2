@@ -32,4 +32,5 @@ export interface CoverDesignProps {
   title: string;
   subtitle?: string;
   period?: string;
+  fontFamily?: string;
 }

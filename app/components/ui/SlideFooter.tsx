@@ -18,8 +18,12 @@ export const SlideFooter: React.FC<SlideFooterProps> = ({
   brandColor = '#3B82F6',
 }) => {
   // Debug: Log what SlideFooter receives
-  console.log('🎯 SlideFooter rendered:', { clientName, period, timestamp: new Date().toISOString() });
-  
+  console.log('🎯 SlideFooter rendered:', {
+    clientName,
+    period,
+    timestamp: new Date().toISOString(),
+  });
+
   return (
     <div
       className="absolute bottom-0 left-0 right-0 h-14 flex items-center justify-between px-8 bg-white/95 backdrop-blur-sm"

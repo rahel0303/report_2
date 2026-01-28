@@ -37,7 +37,7 @@ export const ReportCoverVisual: React.FC<ReportCoverVisualProps> = ({ config, mo
 
   return (
     <div
-      className={`w-full h-full relative flex flex-col overflow-hidden font-sans ${spacing}`}
+      className={`w-full h-full relative flex flex-col overflow-hidden ${spacing}`}
       style={{ ...bgStyle, fontFamily: config.font.name }}
     >
       <div

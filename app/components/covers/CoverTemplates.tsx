@@ -8,12 +8,14 @@ export const GeometricTemplate: React.FC<CoverDesignProps> = ({
   title,
   subtitle,
   period,
+  fontFamily,
 }) => {
   return (
     <div
       className="relative w-full h-full overflow-hidden"
       style={{
         background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`,
+        fontFamily: fontFamily || 'Inter',
       }}
     >
       {/* Geometric Shapes Background */}
@@ -74,9 +76,13 @@ export const FluidWavesTemplate: React.FC<CoverDesignProps> = ({
   title,
   subtitle,
   period,
+  fontFamily,
 }) => {
   return (
-    <div className="relative w-full h-full overflow-hidden bg-white">
+    <div
+      className="relative w-full h-full overflow-hidden bg-white"
+      style={{ fontFamily: fontFamily || 'Inter' }}
+    >
       {/* Wave Patterns */}
       <div className="absolute inset-0">
         <svg
@@ -142,9 +148,13 @@ export const AbstractTemplate: React.FC<CoverDesignProps> = ({
   title,
   subtitle,
   period,
+  fontFamily,
 }) => {
   return (
-    <div className="relative w-full h-full overflow-hidden" style={{ background: colors.primary }}>
+    <div
+      className="relative w-full h-full overflow-hidden"
+      style={{ background: colors.primary, fontFamily: fontFamily || 'Inter' }}
+    >
       {/* Abstract Shapes */}
       <div className="absolute inset-0">
         {/* Large Blob 1 */}
@@ -224,12 +234,14 @@ export const MinimalGradientTemplate: React.FC<CoverDesignProps> = ({
   title,
   subtitle,
   period,
+  fontFamily,
 }) => {
   return (
     <div
       className="relative w-full h-full overflow-hidden"
       style={{
         background: `linear-gradient(to bottom right, ${colors.primary}, ${colors.secondary}, ${colors.accent})`,
+        fontFamily: fontFamily || 'Inter',
       }}
     >
       {/* Subtle Pattern Overlay */}
@@ -276,9 +288,13 @@ export const ModernGridTemplate: React.FC<CoverDesignProps> = ({
   title,
   subtitle,
   period,
+  fontFamily,
 }) => {
   return (
-    <div className="relative w-full h-full overflow-hidden bg-white">
+    <div
+      className="relative w-full h-full overflow-hidden bg-white"
+      style={{ fontFamily: fontFamily || 'Inter' }}
+    >
       {/* Grid Background */}
       <div className="absolute inset-0 grid grid-cols-6 grid-rows-6 gap-0">
         {/* Colored Grid Cells */}

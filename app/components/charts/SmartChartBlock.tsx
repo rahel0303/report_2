@@ -93,15 +93,15 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
     [],
   );
 
-  const postsData: PostData[] = useMemo(
-    () =>
-      Array.from({ length: settings.count || 3 }).map((_, i) => ({
-        id: i,
-        reach: 12000 + i * 1500,
-        eng: 450 + i * 50,
-      })),
-    [settings.count],
-  );
+  const postsData: PostData[] = useMemo(() => {
+    const images = ['/1.png', '/2.png', '/3.png', '/4.png', '/5.png'];
+    return Array.from({ length: settings.count || 3 }).map((_, i) => ({
+      id: i,
+      reach: 12000 + i * 1500,
+      eng: 450 + i * 50,
+      image: images[i % images.length],
+    }));
+  }, [settings.count]);
 
   const renderContent = () => {
     if (!chartType) {
@@ -187,11 +187,19 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
                 }`}
               >
                 <div
-                  className={`flex-1 flex items-center justify-center ${
+                  className={`aspect-[4/3] flex items-center justify-center overflow-hidden group ${
                     isDark ? 'bg-slate-700/50' : 'bg-slate-100/50'
                   }`}
                 >
-                  <ImageIconLucide className="text-slate-300" size={20} />
+                  {post.image ? (
+                    <img
+                      src={post.image}
+                      alt={`Post ${i + 1}`}
+                      className="w-full h-full object-fill group-hover:scale-105 transition-transform duration-200"
+                    />
+                  ) : (
+                    <ImageIconLucide className="text-slate-300" size={20} />
+                  )}
                 </div>
                 <div className={`p-2 border-t ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                   <div className="flex justify-between text-[8px] mb-1">

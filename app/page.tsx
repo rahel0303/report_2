@@ -129,7 +129,7 @@ const ReportSetupInterface: React.FC = () => {
     console.log('✅ Config updated:', {
       clientName: config.clientName,
       period: config.period,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   }, [config.clientName, config.period]);
 
@@ -596,16 +596,19 @@ const ReportSetupInterface: React.FC = () => {
               console.log(`    Processing key: ${key}`, structureInfo);
 
               // Handle charts with structure metadata
-              if ((key === 'chart' || key.startsWith('chart_') || key.includes('chart')) && structureInfo?.chartType) {
+              if (
+                (key === 'chart' || key.startsWith('chart_') || key.includes('chart')) &&
+                structureInfo?.chartType
+              ) {
                 // Try to find matching chart data - try exact key first, then fallback to 'chart'
                 let dummyChartData = allDummyData[key];
-                
+
                 // If key is 'main_chart' or similar, try 'chart' as fallback
                 if (!dummyChartData && key !== 'chart') {
                   console.log(`      🔍 Key "${key}" not found, trying "chart" as fallback`);
                   dummyChartData = allDummyData['chart'];
                 }
-                
+
                 console.log(`      🎨 Chart found! Dummy data:`, dummyChartData);
                 if (dummyChartData) {
                   // Use template's chartType and dataLength
@@ -614,7 +617,9 @@ const ReportSetupInterface: React.FC = () => {
                     chartType: structureInfo.chartType, // Keep same chart type
                     data: dummyChartData.data?.slice(0, dataLength) || [], // Keep same number of data points
                   };
-                  console.log(`      ✅ Chart ${key} populated: type=${structureInfo.chartType}, points=${dataLength}`);
+                  console.log(
+                    `      ✅ Chart ${key} populated: type=${structureInfo.chartType}, points=${dataLength}`,
+                  );
                 } else {
                   console.log(`      ❌ No dummy data for chart ${key}`);
                 }
@@ -811,24 +816,58 @@ const ReportSetupInterface: React.FC = () => {
   };
 
   const renderSlideThumbnail = (slide: Slide) => {
-    // Render based on slide type
+    // Render based on slide type - full size for accurate preview
     switch (slide.type) {
       case 'cover':
         return config.coverDesign ? (
           <CustomCover config={config} key={`cover-${config.clientName}-${config.period}`} />
         ) : (
-          <ReportCoverVisual config={config} mode="thumbnail" key={`cover-${config.clientName}-${config.period}`} />
+          <ReportCoverVisual
+            config={config}
+            mode="full"
+            key={`cover-${config.clientName}-${config.period}`}
+          />
         );
       case 'dashboard':
-        return <InstagramDashboardSlide config={config} isThumbnail={true} key={`thumb-dashboard-${config.clientName}`} />;
+        return (
+          <InstagramDashboardSlide
+            config={config}
+            isThumbnail={false}
+            key={`thumb-dashboard-${config.clientName}`}
+          />
+        );
       case 'layout_dashboard':
-        return <LayoutDashboard config={config} data={slide.content} key={`thumb-layout-dash-${config.clientName}`} />;
+        return (
+          <LayoutDashboard
+            config={config}
+            data={slide.content}
+            key={`thumb-layout-dash-${config.clientName}`}
+          />
+        );
       case 'layout_comparison':
-        return <LayoutComparison config={config} data={slide.content} key={`thumb-layout-comp-${config.clientName}`} />;
+        return (
+          <LayoutComparison
+            config={config}
+            data={slide.content}
+            key={`thumb-layout-comp-${config.clientName}`}
+          />
+        );
       case 'layout_kpi':
-        return <LayoutKPI config={config} data={slide.content} key={`thumb-layout-kpi-${config.clientName}`} />;
+        return (
+          <LayoutKPI
+            config={config}
+            data={slide.content}
+            key={`thumb-layout-kpi-${config.clientName}`}
+          />
+        );
       case 'layout_content':
-        return <LayoutContent config={config} data={slide.content} key={`thumb-layout-content-${config.clientName}`} />;
+        return (
+          <LayoutContent
+            config={config}
+            data={slide.content}
+            key={`thumb-layout-content-${config.clientName}`}
+          />
+        );
       case 'placeholder':
       default:
         return (
@@ -1433,8 +1472,31 @@ const ReportSetupInterface: React.FC = () => {
                     className="group cursor-pointer bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-lg hover:border-blue-400 transition-all hover:-translate-y-1"
                   >
                     <div className="aspect-video relative border-b border-slate-100 overflow-hidden bg-white">
-                      {/* Thumbnail preview */}
-                      <div className="w-full h-full">{renderSlideThumbnail(slide)}</div>
+                      {/* Thumbnail preview - scaled to fit */}
+                      <div className="w-full h-full relative">
+                        <div
+                          className="absolute inset-0 origin-top-left"
+                          style={{
+                            width: '1280px',
+                            height: '720px',
+                            transform: 'scale(var(--thumb-scale))',
+                          }}
+                          ref={(el) => {
+                            if (el) {
+                              const parent = el.parentElement;
+                              if (parent) {
+                                const scale = Math.min(
+                                  parent.offsetWidth / 1280,
+                                  parent.offsetHeight / 720,
+                                );
+                                el.style.setProperty('--thumb-scale', scale.toString());
+                              }
+                            }
+                          }}
+                        >
+                          {renderSlideThumbnail(slide)}
+                        </div>
+                      </div>
 
                       <div className="absolute inset-0 bg-white/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition duration-200">
                         <div className="bg-white px-4 py-2 rounded-full shadow-sm text-xs font-bold text-blue-600 flex items-center gap-2 border border-slate-100">
@@ -1631,6 +1693,7 @@ const ReportSetupInterface: React.FC = () => {
               initialTitle={config.reportTitle}
               initialSubtitle={config.reportDetails}
               initialPeriod={config.period}
+              fontFamily={config.font.name}
             />
           </div>
         )}
