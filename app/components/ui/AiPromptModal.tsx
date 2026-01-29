@@ -25,22 +25,23 @@ export const AiPromptModal: React.FC<AiPromptModalProps> = ({
 
     try {
       const systemPrompt =
-        "You are a professional social media analyst helper. Your goal is to generate a single, professional insight paragraph suitable for a presentation slide based on the user's request. Use *bold* for emphasis on key metrics or trends. Keep it concise (under 50 words) and impactful. Return ONLY the content without any intro text.";
+        'Generate SHORT insights for social media report. CRITICAL RULES: 1) WRITE ONLY IN ENGLISH LANGUAGE (NO Indonesian words!) 2) Each MUST be UNDER 150 characters 3) Use **bold** ONLY for key numbers. Use casual, punchy English tone.';
 
       let fullPrompt = prompt;
 
       // If we have context data, include it in the analysis
       if (contextData) {
         const contextStr = JSON.stringify(contextData, null, 2);
-        fullPrompt = `Context Data:\n${contextStr}\n\nUser Request: ${prompt || 'Provide 3 key insights from this data in bullet points'}\n\nProvide ONLY the insights without any intro text:`;
+        fullPrompt = `Context Data:\n${contextStr}\n\nUser Request: ${prompt || 'Provide 3 engaging insights from this data in bullet points'}\n\nIMPORTANT: Provide EXACTLY 3 bullet points IN ENGLISH ONLY:\n- Start with dash (-) + space\n- UNDER 150 characters each\n- Use **bold** ONLY for numbers\n- SHORT and punchy\n- WRITE ONLY IN ENGLISH (NO Indonesian!)\n\nExamples (all in English):\n- ER up **4.2%**! Polls boosted engagement\n- Reach **+35%** at **9 AM** peak`;
       }
 
       let result = await generateGeminiContent(fullPrompt, systemPrompt);
 
-      // Clean AI response - remove intro phrases
+      // Clean AI response - remove intro phrases but keep bold markers
       result = result
         .replace(/^(Tentu|Sure|Berikut|Here|Okay|Here is|Here's|Berikut adalah)[^\n]*\n*/gi, '')
         .replace(/^[^:]*:\s*/g, '')
+        .replace(/(?<!\*)\*(?!\*)/g, '') // Only remove single asterisks, keep **bold**
         .trim();
 
       onGenerate(result);

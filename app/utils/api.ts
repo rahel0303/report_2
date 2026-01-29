@@ -4,13 +4,13 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 export const generateGeminiContent = async (
   prompt: string,
   systemInstruction: string = '',
-  model: string = 'gemini-2.5-flash-lite',
+  model: string = 'gemini-2.5-flash',
 ): Promise<string> => {
   // Try to get API key from environment or localStorage
   const apiKey =
     process.env.NEXT_PUBLIC_GEMINI_API_KEY ||
     (typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') : null) ||
-    'AIzaSyBo1HRwT6xSPydfqTzlRbpmFnM2baGlf_o'; // Fallback key
+    'AIzaSyC-E1zrSqgd8TY2k-KW9E6ghVsPxyIRPKs'; // Fallback key
 
   if (!apiKey || apiKey === '') {
     return 'API key not configured. Please add your Gemini API key.';

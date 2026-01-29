@@ -76,38 +76,78 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
       // Build prompts based on context type
       if (contextType === 'instagram_summary') {
         systemPrompt =
-          'You are a professional social media analyst. Analyze the Instagram performance data and generate 3 concise key takeaways (bullet points). Focus on significant changes in reach, engagement, and growth. Use *bold* for key numbers. Each point should be under 50 words.';
+          'You are a social media analyst. Generate 3 SHORT, punchy insights for Instagram report. CRITICAL RULES: 1) WRITE ONLY IN ENGLISH LANGUAGE (NO Indonesian words!) 2) Each insight MUST be UNDER 150 characters 3) Use **bold** ONLY for key numbers. Use casual English tone.';
         dataPrompt = `Instagram Performance Data:\n${JSON.stringify(contextData, null, 2)}`;
       } else if (contextType === 'growth_analysis') {
         systemPrompt =
-          'You are a growth analytics expert. Analyze the growth data and provide 3 actionable insights about trends, patterns, and opportunities. Use *bold* for percentages and key metrics.';
+          'You are a growth analyst. Generate 3 SHORT insights for social media growth report. CRITICAL: Each MUST be UNDER 150 characters. Use **bold** ONLY for key numbers. Write in casual, data-driven Indonesian tone.';
         dataPrompt = `Growth Analysis Data:\n${JSON.stringify(contextData, null, 2)}`;
       } else if (contextType === 'content_performance') {
         systemPrompt =
-          'You are a content strategist. Analyze post performance data and provide 3 strategic insights about what content performs best. Highlight top performers with *bold*.';
+          'You are a content strategist. Generate 3 SHORT insights for content performance. CRITICAL: Each MUST be UNDER 150 characters. Use **bold** ONLY for key numbers. Write in clear, actionable Indonesian tone.';
         dataPrompt = `Content Performance Data:\n${JSON.stringify(contextData, null, 2)}`;
       } else {
         // Generic analysis
         systemPrompt =
-          'You are a data analyst. Provide 3 professional insights based on the data below. Use *bold* for emphasis on key findings.';
+          'You are a data analyst. Generate 3 SHORT insights for social media report. CRITICAL: Each MUST be UNDER 150 characters. Use **bold** ONLY for key numbers. Write in engaging Indonesian tone.';
         dataPrompt = `Data:\n${JSON.stringify(contextData, null, 2)}`;
       }
 
-      const fullPrompt = `${dataPrompt}\n\nProvide 3 bullet points (start each with '-' or '*'). Keep each point concise and actionable.`;
+      const fullPrompt = `${dataPrompt}\n\nIMPORTANT: Provide EXACTLY 3 bullet points IN ENGLISH ONLY. Each point MUST:\n- Start with dash (-) + one space\n- Be UNDER 150 characters (COUNT CAREFULLY!)\n- Use **bold** ONLY for numbers/percentages\n- Be SHORT, punchy, and actionable\n- WRITE ONLY IN ENGLISH (absolutely NO Indonesian words!)\n\nGOOD Examples (all in English, under 150 chars):\n- ER jumped **4.2%**! Polls and Q&A boosted interaction\n- Reach spiked **35%** at **9 AM** peak time\n- Reels got **2x** more saves than regular feed posts`;
 
       let result = await generateGeminiContent(fullPrompt, systemPrompt);
 
-      // Clean AI response - remove intro/outro text
+      // Clean AI response - remove intro/outro text but keep bold markers
       result = result
         .replace(/^(Tentu|Sure|Berikut|Here|Okay)[^\n]*\n*/gi, '')
-        .replace(/^[^-*]*?((?=-)|(?=\*))/, '')
+        .replace(/^[^-]*?((?=-)|(?=\*\*))/, '')
         .trim();
 
       // Parse bullet points
       const lines = result
         .split('\n')
-        .filter((line) => line.trim().startsWith('-') || line.trim().startsWith('*'))
-        .map((l) => l.replace(/^[-*]\s*/, ''));
+        .filter((line) => line.trim().startsWith('-'))
+        .map((l) => {
+          let cleaned = l.replace(/^-\s*/, '').trim();
+          // Keep **bold** markers, only remove single asterisks if needed
+          cleaned = cleaned.replace(/(?<!\*)\*(?!\*)/g, '');
+
+          // AGGRESSIVE truncation to ensure MAXIMUM 150 characters
+          const textOnly = cleaned.replace(/\*\*/g, '');
+          if (textOnly.length > 150) {
+            // Need to truncate while preserving bold markers
+            let charCount = 0;
+            let result = '';
+            let inBold = false;
+            let i = 0;
+
+            while (i < cleaned.length && charCount < 147) {
+              if (cleaned.substring(i, i + 2) === '**') {
+                result += '**';
+                inBold = !inBold;
+                i += 2;
+              } else {
+                result += cleaned[i];
+                charCount++;
+                i++;
+              }
+            }
+
+            // Close bold if still open
+            if (inBold) result += '**';
+            cleaned = result + '...';
+          }
+
+          // Double check: if still over 150 after processing, force truncate
+          const finalCheck = cleaned.replace(/\*\*/g, '');
+          if (finalCheck.length > 150) {
+            cleaned = cleaned.substring(0, 147) + '...';
+          }
+
+          return cleaned;
+        })
+        .filter((l) => l.length > 0)
+        .slice(0, 3); // Only take first 3
 
       if (lines.length > 0) {
         const generatedText = lines.join('\n');
@@ -137,20 +177,96 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
     setIsGenerating(true);
 
     try {
-      const systemPrompt =
-        "You are a professional content editor. Modify the existing content based on the user's instructions. Maintain the core information but adjust the format, style, or structure as requested. Use *bold* for emphasis. Return ONLY the refined content without any intro text.";
-      const fullPrompt = `Current content:\n${content}\n\nUser instruction: ${refinementPrompt}\n\nProvide ONLY the refined version without any intro text:`;
+      // Use the SAME system prompt as autoGenerateInsight
+      let systemPrompt = '';
+      let dataPrompt = '';
+
+      // Build prompts based on context type (SAME as autoGenerateInsight)
+      if (contextType === 'instagram_summary') {
+        systemPrompt =
+          'You are a social media analyst. Generate 3 SHORT, punchy insights for Instagram report. CRITICAL RULES: 1) WRITE ONLY IN ENGLISH LANGUAGE (NO Indonesian words!) 2) Each insight MUST be UNDER 150 characters 3) Use **bold** ONLY for key numbers. Use casual English tone.';
+        dataPrompt = `Instagram Performance Data:\n${JSON.stringify(contextData, null, 2)}`;
+      } else if (contextType === 'growth_analysis') {
+        systemPrompt =
+          'You are a growth analyst. Generate 3 SHORT insights for social media growth report. CRITICAL RULES: 1) WRITE ONLY IN ENGLISH LANGUAGE (NO Indonesian!) 2) Each MUST be UNDER 150 characters 3) Use **bold** ONLY for key numbers. Use casual English tone.';
+        dataPrompt = `Growth Analysis Data:\n${JSON.stringify(contextData, null, 2)}`;
+      } else if (contextType === 'content_performance') {
+        systemPrompt =
+          'You are a content strategist. Generate 3 SHORT insights for content performance. CRITICAL RULES: 1) WRITE ONLY IN ENGLISH LANGUAGE (NO Indonesian!) 2) Each MUST be UNDER 150 characters 3) Use **bold** ONLY for key numbers. Use clear English tone.';
+        dataPrompt = `Content Performance Data:\n${JSON.stringify(contextData, null, 2)}`;
+      } else {
+        // Generic analysis
+        systemPrompt =
+          'You are a data analyst. Generate 3 SHORT insights for social media report. CRITICAL RULES: 1) WRITE ONLY IN ENGLISH LANGUAGE (NO Indonesian!) 2) Each MUST be UNDER 150 characters 3) Use **bold** ONLY for key numbers. Use engaging English tone.';
+        dataPrompt = `Data:\n${JSON.stringify(contextData, null, 2)}`;
+      }
+
+      // Same base prompt as autoGenerateInsight, but ADD user refinement instruction
+      const fullPrompt = `${dataPrompt}\n\nUser additional request: ${refinementPrompt}\n\nIMPORTANT: Provide EXACTLY 3 bullet points IN ENGLISH ONLY. Each point MUST:\n- Start with dash (-) + one space\n- Be UNDER 150 characters (COUNT CAREFULLY!)\n- Use **bold** ONLY for numbers/percentages\n- Be SHORT, punchy, and actionable\n- WRITE ONLY IN ENGLISH (absolutely NO Indonesian words!)\n- Follow user's additional request above\n\nGOOD Examples (all in English, under 150 chars):\n- ER jumped **4.2%**! Polls and Q&A boosted interaction\n- Reach spiked **35%** at **9 AM** peak time\n- Reels got **2x** more saves than regular feed posts`;
 
       let result = await generateGeminiContent(fullPrompt, systemPrompt);
 
-      // Clean AI response - remove common intro phrases
+      // Clean AI response - remove intro/outro text but keep bold markers
       result = result
         .replace(/^(Tentu|Sure|Berikut|Here|Okay|Here is|Here's|Berikut adalah)[^\n]*\n*/gi, '')
         .replace(/^[^:]*:\s*/g, '')
+        .replace(/^[^-]*?((?=-)|(?=\*\*))/, '')
         .trim();
 
-      setContent(result);
-      if (onSave) onSave(result);
+      // Parse bullet points (SAME logic as autoGenerateInsight)
+      const lines = result
+        .split('\n')
+        .filter((line) => line.trim().startsWith('-'))
+        .map((l) => {
+          let cleaned = l.replace(/^-\s*/, '').trim();
+          // Keep **bold** markers, only remove single asterisks if needed
+          cleaned = cleaned.replace(/(?<!\*)\*(?!\*)/g, '');
+
+          // AGGRESSIVE truncation to ensure MAXIMUM 150 characters
+          const textOnly = cleaned.replace(/\*\*/g, '');
+          if (textOnly.length > 150) {
+            // Need to truncate while preserving bold markers
+            let charCount = 0;
+            let result = '';
+            let inBold = false;
+            let i = 0;
+
+            while (i < cleaned.length && charCount < 147) {
+              if (cleaned.substring(i, i + 2) === '**') {
+                result += '**';
+                inBold = !inBold;
+                i += 2;
+              } else {
+                result += cleaned[i];
+                charCount++;
+                i++;
+              }
+            }
+
+            // Close bold if still open
+            if (inBold) result += '**';
+            cleaned = result + '...';
+          }
+
+          // Double check: if still over 150 after processing, force truncate
+          const finalCheck = cleaned.replace(/\*\*/g, '');
+          if (finalCheck.length > 150) {
+            cleaned = cleaned.substring(0, 147) + '...';
+          }
+
+          return cleaned;
+        })
+        .filter((l) => l.length > 0)
+        .slice(0, 3); // Only take first 3 (SAME as autoGenerateInsight)
+
+      if (lines.length > 0) {
+        const refinedText = lines.join('\n');
+        setContent(refinedText);
+        if (onSave) onSave(refinedText);
+      } else {
+        // If no bullet points found, show error
+        alert('Failed to generate proper format. Please try again.');
+      }
     } catch (error) {
       console.error('AI refinement failed:', error);
       alert('Failed to refine content. Please try manual editing.');
@@ -247,13 +363,13 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
           <div onClick={handleBlockClick} className="h-full w-full cursor-pointer">
             {content ? (
               <div
-                className={`h-full w-full p-3 rounded-lg border overflow-hidden relative transition-all group-hover:ring-2 group-hover:ring-blue-400/50 ${
+                className={`h-full w-full p-3 rounded-lg border relative transition-all group-hover:ring-2 group-hover:ring-blue-400/50 flex flex-col ${
                   isDark
                     ? 'bg-white/5 border-white/10 text-slate-300'
                     : 'bg-white border-slate-200 text-slate-600'
                 }`}
               >
-                <div className="flex justify-between items-start mb-2 opacity-50">
+                <div className="flex justify-between items-start mb-2 opacity-50 flex-shrink-0">
                   <div className="flex items-center gap-1.5">
                     {icon && React.createElement(icon, { size: 12 })}
                     <span className={`font-bold uppercase tracking-wider ${fontSize.content}`}>
@@ -275,7 +391,8 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
                   </div>
                 </div>
                 <div
-                  className={`${fontSize.content} leading-relaxed whitespace-pre-wrap font-medium`}
+                  className={`${fontSize.content} leading-relaxed whitespace-pre-wrap font-medium overflow-y-auto overflow-x-hidden flex-1 break-words overflow-wrap-anywhere max-w-full pr-1`}
+                  style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
                 >
                   {renderTextWithHighlights(content, isDark, colorPrimary)}
                 </div>
