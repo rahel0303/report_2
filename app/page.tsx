@@ -1,12 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
 import PptxGenJS from 'pptxgenjs';
 import {
   Settings,
-  Calendar,
   Layout,
   Palette,
   ChevronRight,
@@ -15,7 +12,6 @@ import {
   ArrowLeft,
   MousePointerClick,
   Edit3,
-  Save,
   ChevronDown,
   X,
   Plus,
@@ -24,7 +20,6 @@ import {
   Presentation,
   FileText,
   Minus,
-  RefreshCw,
 } from 'lucide-react';
 
 // Import types
