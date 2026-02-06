@@ -35,6 +35,7 @@ export interface ReportConfig {
       secondary: string;
       accent: string;
     };
+    contentMode?: 'light' | 'dark';
   };
 }
 
@@ -46,7 +47,8 @@ export type SlideType =
   | 'layout_dashboard'
   | 'layout_comparison'
   | 'layout_kpi'
-  | 'layout_content';
+  | 'layout_content'
+  | 'section_heading';
 
 export interface Slide {
   id: number;

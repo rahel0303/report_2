@@ -57,8 +57,8 @@ export const GeometricTemplate: React.FC<CoverDesignProps> = ({
       {/* Content */}
       <div className="relative z-10 flex flex-col items-center justify-center h-full px-12 text-white">
         {logo && (
-          <div className="mb-8">
-            <img src={logo} alt="Logo" className="h-24 object-contain" />
+          <div className="mb-6 flex justify-center">
+            <img src={logo} alt="Logo" className="h-20 object-contain rounded-xl" />
           </div>
         )}
         <h1 className="text-6xl font-bold text-center mb-4 drop-shadow-lg">{title}</h1>
@@ -124,8 +124,8 @@ export const FluidWavesTemplate: React.FC<CoverDesignProps> = ({
       {/* Content */}
       <div className="relative z-10 flex flex-col items-center justify-center h-full px-12">
         {logo && (
-          <div className="mb-8">
-            <img src={logo} alt="Logo" className="h-24 object-contain" />
+          <div className="mb-6 flex justify-center">
+            <img src={logo} alt="Logo" className="h-20 object-contain rounded-xl" />
           </div>
         )}
         <h1
@@ -215,8 +215,8 @@ export const AbstractTemplate: React.FC<CoverDesignProps> = ({
       {/* Content */}
       <div className="relative z-10 flex flex-col items-center justify-center h-full px-12 text-white">
         {logo && (
-          <div className="mb-8">
-            <img src={logo} alt="Logo" className="h-24 object-contain" />
+          <div className="mb-6 flex justify-center">
+            <img src={logo} alt="Logo" className="h-20 object-contain rounded-xl" />
           </div>
         )}
         <h1 className="text-6xl font-bold text-center mb-4 drop-shadow-lg">{title}</h1>
@@ -267,8 +267,8 @@ export const MinimalGradientTemplate: React.FC<CoverDesignProps> = ({
       {/* Content */}
       <div className="relative z-10 flex flex-col items-center justify-center h-full px-12 text-white">
         {logo && (
-          <div className="mb-8 p-4 bg-white bg-opacity-10 rounded-2xl backdrop-blur-sm">
-            <img src={logo} alt="Logo" className="h-24 object-contain" />
+          <div className="mb-6 flex justify-center">
+            <img src={logo} alt="Logo" className="h-20 object-contain rounded-xl" />
           </div>
         )}
         <h1 className="text-7xl font-bold text-center mb-4 drop-shadow-2xl tracking-tight">
@@ -333,8 +333,8 @@ export const ModernGridTemplate: React.FC<CoverDesignProps> = ({
       {/* Content */}
       <div className="relative z-10 flex flex-col items-start justify-center h-full px-20">
         {logo && (
-          <div className="mb-8">
-            <img src={logo} alt="Logo" className="h-20 object-contain" />
+          <div className="mb-6">
+            <img src={logo} alt="Logo" className="h-16 object-contain rounded-xl" />
           </div>
         )}
         <div className="max-w-2xl">

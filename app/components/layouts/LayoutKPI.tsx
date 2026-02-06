@@ -1,6 +1,6 @@
 import React from 'react';
 import { LayoutProps } from '@/app/types';
-import { EditableSlideTitle, SlideFooter } from '@/app/components/ui';
+import { EditableSlideTitle, SlideFooter, ChannelBadge } from '@/app/components/ui';
 import { MetricScorecard, SmartChartBlock } from '@/app/components/charts';
 import { SmartInsightBlock } from '@/app/components/insights';
 import { Sparkles } from 'lucide-react';
@@ -15,11 +15,14 @@ export const LayoutKPI: React.FC<LayoutProps> = ({
   totalPages = 1,
   isExport = false,
 }) => {
-  const isDark = config.theme.type === 'dark';
+  // Use logo colors if available, otherwise fallback to theme
+  const logoColors = config.coverDesign?.colors;
+  const isDark = false; // Always light mode for cleaner look
   const styles = {
-    bg: config.theme.colors[0],
-    cardBg: isDark ? 'rgba(255,255,255,0.05)' : '#ffffff',
-    border: isDark ? 'border-white/20' : 'border-slate-200',
+    bg: '#ffffff',
+    cardBg: '#ffffff',
+    border: 'border-slate-200',
+    accent: logoColors?.primary || config.theme.brandColor,
   };
 
   return (
@@ -27,8 +30,15 @@ export const LayoutKPI: React.FC<LayoutProps> = ({
       className="w-full h-full flex flex-col p-6 gap-4 pb-16 relative"
       style={{ fontFamily: config.font.name, backgroundColor: styles.bg }}
     >
-      <div className={`h-[10%] shrink-0 border-b flex items-end pb-4 ${styles.border}`}>
+      <div
+        className={`h-[10%] shrink-0 border-b flex items-center justify-between pb-4 ${styles.border}`}
+      >
         <EditableSlideTitle title={title} onChange={onTitleChange} isDark={isDark} />
+        {data.channel && (
+          <div className="ml-4">
+            <ChannelBadge channel={data.channel} isDark={isDark} size="lg" />
+          </div>
+        )}
       </div>
 
       <div className="flex gap-4 h-[22%] min-h-[120px]">

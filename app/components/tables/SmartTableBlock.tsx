@@ -18,7 +18,9 @@ export const SmartTableBlock: React.FC<SmartTableBlockProps> = ({
     setTableState(savedState || null);
   }, [savedState]);
 
-  const isDark = config.theme.type === 'dark';
+  // Use contentMode from coverDesign for theme
+  const contentMode = config.coverDesign?.contentMode || 'light';
+  const isDark = contentMode === 'dark';
 
   // Font sizes - much larger for export
   const fontSize = {
@@ -31,9 +33,10 @@ export const SmartTableBlock: React.FC<SmartTableBlockProps> = ({
     cardBg: isDark ? 'bg-slate-800' : 'bg-white',
     textMain: isDark ? 'text-white' : 'text-slate-900',
     textMuted: isDark ? 'text-slate-400' : 'text-slate-500',
-    border: isDark ? 'border-slate-700' : 'border-slate-200',
+    border: isDark ? 'border-slate-600' : 'border-slate-200',
     headerBg: isDark ? 'bg-slate-700/50' : 'bg-slate-50',
     rowHover: isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50',
+    stickyBg: isDark ? 'bg-slate-800' : 'bg-white',
   };
 
   const handleConfigSave = (config: TableConfig) => {
@@ -168,7 +171,7 @@ export const SmartTableBlock: React.FC<SmartTableBlockProps> = ({
                   <td
                     className={`px-3 py-2 text-left ${fontSize.cell} font-bold sticky left-0 z-10 ${
                       styles.textMain
-                    } ${isDark ? 'bg-slate-800' : 'bg-white'}`}
+                    } ${styles.stickyBg}`}
                   >
                     {row.label}
                   </td>

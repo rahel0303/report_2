@@ -17,11 +17,14 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
     setData(savedState || null);
   }, [savedState]);
 
-  const isDark = config.theme.type === 'dark';
+  // Use contentMode from coverDesign for theme
+  const contentMode = config.coverDesign?.contentMode || 'light';
+  const isDark = contentMode === 'dark';
   const styles = {
-    cardBg: isDark ? 'rgba(255,255,255,0.05)' : '#ffffff',
+    cardBg: isDark ? 'rgba(30, 41, 59, 0.8)' : '#ffffff',
     textMain: isDark ? 'text-white' : 'text-slate-900',
     textMuted: isDark ? 'text-slate-400' : 'text-slate-500',
+    border: isDark ? 'border-white/20' : 'border-slate-200',
   };
 
   // Font sizes for export
@@ -94,9 +97,7 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
   return (
     <>
       <div
-        className={`w-full h-full rounded-xl border p-4 shadow-sm flex flex-col justify-between relative group cursor-pointer transition-all hover:shadow-md ${
-          isDark ? 'border-white/10' : 'border-slate-200'
-        }`}
+        className={`w-full h-full rounded-xl border p-4 shadow-sm flex flex-col justify-between relative group cursor-pointer transition-all hover:shadow-md ${styles.border}`}
         style={{ backgroundColor: styles.cardBg }}
         onClick={() => setIsModalOpen(true)}
       >

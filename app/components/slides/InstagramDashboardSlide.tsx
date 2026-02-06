@@ -35,6 +35,7 @@ import {
 } from '@/app/utils/helpers';
 import { generateGeminiContent } from '@/app/utils/api';
 import { SlideFooter } from '@/app/components/ui';
+import { generateLayoutTheme } from '@/app/utils/themeStyles';
 
 export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = ({
   config,
@@ -43,7 +44,14 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
   totalPages = 1,
   isExport = false,
 }) => {
-  const isDark = config.theme.type === 'dark';
+  // Generate theme from logo colors with content mode
+  const contentMode = config.coverDesign?.contentMode || 'light';
+  const theme = generateLayoutTheme(
+    config.coverDesign?.colors,
+    config.theme.brandColor,
+    contentMode
+  );
+  const isDark = contentMode === 'dark';
 
   // Font sizes - much larger for export
   const fontSize = {
@@ -62,11 +70,12 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
   };
 
   const styles = {
-    bg: config.theme.colors[0],
+    bg: isDark ? config.theme.colors[0] : theme.pageBg,
     textMain: isDark ? 'text-white' : 'text-slate-900',
     textMuted: isDark ? 'text-slate-300' : 'text-slate-500',
     cardBg: isDark ? 'rgba(255,255,255,0.05)' : '#ffffff',
     border: isDark ? 'border-white/20' : 'border-slate-200',
+    borderColor: theme.border,
     gridColor: isDark ? 'rgba(255,255,255,0.1)' : '#f1f5f9',
     axisColor: isDark ? '#cbd5e1' : '#64748b',
     tableHeaderBg: isDark ? 'rgba(0,0,0,0.2)' : '#f8fafc',
@@ -80,10 +89,12 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
     aiButtonInactive: isDark
       ? 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10'
       : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100',
+    cardShadow: theme.cardShadow,
+    accentLine: theme.accentLine,
   };
 
-  const colorPrimary = config.theme.brandColor;
-  const colorSecondary = config.theme.colors[4];
+  const colorPrimary = theme.colors.primary;
+  const colorSecondary = theme.colors.secondary;
 
   const chartData: DashboardChartDataPoint[] = useMemo(() => {
     const data: DashboardChartDataPoint[] = [];
@@ -324,11 +335,23 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
   return (
     <div
       className="w-full h-full flex flex-col overflow-hidden transition-colors duration-300 pb-16 relative"
-      style={{ fontFamily: config.font.name, backgroundColor: styles.bg }}
+      style={{ fontFamily: config.font.name, background: styles.bg }}
     >
+      {/* Decorative accent line at top */}
+      <div
+        className="absolute top-0 left-0 right-0 h-[3px] z-10"
+        style={{ background: styles.accentLine }}
+      />
+
+      {/* Decorative elements */}
+      <div
+        className="absolute -top-20 -right-20 w-48 h-48 rounded-full pointer-events-none"
+        style={{ background: theme.decorCircle1, filter: 'blur(40px)' }}
+      />
+
       <header
-        className={`px-6 py-3 border-b flex justify-between items-center h-[12%] shrink-0 ${styles.border}`}
-        style={{ backgroundColor: styles.bg }}
+        className={`px-6 py-3 border-b flex justify-between items-center h-[12%] shrink-0 relative ${styles.border}`}
+        style={{ borderColor: styles.borderColor }}
       >
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg" style={{ backgroundColor: `${colorPrimary}20` }}>
@@ -372,9 +395,14 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
       <div className="flex-1 flex flex-col p-4 gap-3 overflow-hidden min-h-0">
         <div className="flex gap-3 h-[55%] min-h-0 w-full">
           <div
-            className={`flex-[1.85] rounded-xl border p-3 shadow-sm flex flex-col min-w-0 ${styles.border}`}
-            style={{ backgroundColor: styles.cardBg }}
+            className={`flex-[1.85] rounded-xl border p-3 flex flex-col min-w-0 relative overflow-hidden ${styles.border}`}
+            style={{ backgroundColor: styles.cardBg, boxShadow: styles.cardShadow, borderColor: styles.borderColor }}
           >
+            {/* Card accent line */}
+            <div
+              className="absolute top-0 left-4 right-4 h-[2px] rounded-full"
+              style={{ background: styles.accentLine }}
+            />
             <div className="flex justify-between items-center mb-1">
               <h3
                 className={`${fontSize.sectionHeader} font-bold flex items-center gap-2 ${styles.textMain}`}
@@ -695,7 +723,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
           currentPage={currentPage}
           totalPages={totalPages}
           logo={config.coverDesign?.logoData}
-          brandColor={config.theme.brandColor}
+          brandColor={theme.colors.primary}
         />
       )}
     </div>

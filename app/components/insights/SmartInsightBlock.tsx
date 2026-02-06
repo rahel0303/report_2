@@ -29,8 +29,10 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
   const [showAiPromptModal, setShowAiPromptModal] = useState(false);
   const [showRefinementModal, setShowRefinementModal] = useState(false);
 
-  const isDark = config.theme.type === 'dark';
-  const colorPrimary = config.theme.brandColor;
+  // Use contentMode from coverDesign for theme
+  const contentMode = config.coverDesign?.contentMode || 'light';
+  const isDark = contentMode === 'dark';
+  const colorPrimary = config.coverDesign?.colors?.primary || config.theme.brandColor;
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Font sizes for export
@@ -369,7 +371,7 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
                     : 'bg-white border-slate-200 text-slate-600'
                 }`}
               >
-                <div className="flex justify-between items-start mb-2 opacity-50 flex-shrink-0">
+                <div className="flex justify-between items-start mb-2 opacity-50 shrink-0">
                   <div className="flex items-center gap-1.5">
                     {icon && React.createElement(icon, { size: 12 })}
                     <span className={`font-bold uppercase tracking-wider ${fontSize.content}`}>
@@ -391,7 +393,7 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
                   </div>
                 </div>
                 <div
-                  className={`${fontSize.content} leading-relaxed whitespace-pre-wrap font-medium overflow-y-auto overflow-x-hidden flex-1 break-words overflow-wrap-anywhere max-w-full pr-1`}
+                  className={`${fontSize.content} leading-relaxed whitespace-pre-wrap font-medium overflow-y-auto overflow-x-hidden flex-1 wrap-break-word overflow-wrap-anywhere max-w-full pr-1`}
                   style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
                 >
                   {renderTextWithHighlights(content, isDark, colorPrimary)}

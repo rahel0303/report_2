@@ -15,14 +15,99 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import {
-  SmartChartBlockProps,
-  ChartType,
-  LineChartDataPoint,
-  PieChartDataPoint,
-  PostData,
-} from '@/app/types';
+import { SmartChartBlockProps, ChartType, PieChartDataPoint, PostData } from '@/app/types';
 import { ChartSelectionModal } from '@/app/components/ui';
+
+// Metric labels for display
+const METRIC_LABELS: Record<string, string> = {
+  followers: 'Followers',
+  profile_views: 'Profile Views',
+  profile_reach: 'Profile Reach',
+  net_followers_growth: 'Net Growth',
+  engagements: 'Engagements',
+  likes: 'Likes',
+  comments: 'Comments',
+  shares: 'Shares',
+  engagement: 'Engagement',
+  followers_growth_pct: 'Growth %',
+  er_reach: 'ER Reach',
+  avg_engagements: 'Avg Eng.',
+  total_reach: 'Total Reach',
+  number_of_posts: 'Posts',
+  avg_er_pct: 'Avg ER%',
+  avg_reach: 'Avg Reach',
+  avg_er_reach: 'Avg ER Reach',
+  followers_growth: 'Followers Growth',
+};
+
+// Generate dummy data based on dimension
+const generateLineChartData = (dimension: string, metrics: string[]) => {
+  const getLabels = () => {
+    switch (dimension) {
+      case 'days':
+        return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      case 'last3months':
+        const now = new Date();
+        return [
+          new Date(now.setMonth(now.getMonth() - 2)).toLocaleString('en', { month: 'short' }),
+          new Date(now.setMonth(now.getMonth() + 1)).toLocaleString('en', { month: 'short' }),
+          new Date(now.setMonth(now.getMonth() + 1)).toLocaleString('en', { month: 'short' }),
+        ];
+      case 'sentiments':
+        return ['Very Negative', 'Negative', 'Neutral', 'Positive', 'Very Positive'];
+      case 'months':
+      default:
+        return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+    }
+  };
+
+  const labels = getLabels();
+  return labels.map((label, idx) => {
+    const dataPoint: Record<string, any> = { name: label };
+    metrics.forEach((metric, mIdx) => {
+      // Generate realistic-looking random data
+      const baseValue = 1000 + mIdx * 500;
+      const variation = Math.floor(Math.random() * 2000) - 500;
+      const trend = idx * 100; // Slight upward trend
+      dataPoint[metric] = Math.max(0, baseValue + variation + trend);
+    });
+    return dataPoint;
+  });
+};
+
+// Generate dummy data for bar chart
+const generateBarChartData = (barCategory: string, metrics: string[]) => {
+  const getLabels = () => {
+    switch (barCategory) {
+      case 'daily_performance':
+        return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      case 'last3months_performance':
+        const now = new Date();
+        return [
+          new Date(now.setMonth(now.getMonth() - 2)).toLocaleString('en', { month: 'short' }),
+          new Date(now.setMonth(now.getMonth() + 1)).toLocaleString('en', { month: 'short' }),
+          new Date(now.setMonth(now.getMonth() + 1)).toLocaleString('en', { month: 'short' }),
+        ];
+      case 'content_pillars':
+        return ['Educational', 'Promotional', 'Entertainment', 'User Generated'];
+      case 'competitors':
+        return ['Brand', 'Competitor A', 'Competitor B', 'Competitor C'];
+      default:
+        return ['A', 'B', 'C', 'D'];
+    }
+  };
+
+  const labels = getLabels();
+  return labels.map((label, idx) => {
+    const dataPoint: Record<string, any> = { name: label };
+    metrics.forEach((metric, mIdx) => {
+      const baseValue = 500 + mIdx * 300;
+      const variation = Math.floor(Math.random() * 1000);
+      dataPoint[metric] = Math.max(0, baseValue + variation);
+    });
+    return dataPoint;
+  });
+};
 
 export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
   label,
@@ -33,7 +118,7 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
   isExport = false,
 }) => {
   const [chartType, setChartType] = useState<ChartType | null>(savedState?.type || null);
-  const [settings, setSettings] = useState(savedState?.settings || {});
+  const [settings, setSettings] = useState<any>(savedState?.settings || {});
   const [blockTitle, setBlockTitle] = useState(savedState?.title || label);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -42,13 +127,27 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
   useEffect(() => {
     if (savedState) {
       setChartType(savedState.type);
-      setSettings(savedState.settings);
+      setSettings(savedState.settings || {});
       if (savedState.title) setBlockTitle(savedState.title);
     }
   }, [savedState]);
 
-  const isDark = config.theme.type === 'dark';
-  const colorPrimary = config.theme.brandColor;
+  // Use contentMode from coverDesign for theme
+  const contentMode = config.coverDesign?.contentMode || 'light';
+  const isDark = contentMode === 'dark';
+  const colorPrimary = config.coverDesign?.colors?.primary || config.theme.brandColor;
+
+  // Define better color palette for metrics
+  const metricColors = [
+    '#3b82f6', // blue
+    '#10b981', // green
+    '#f59e0b', // amber
+    '#ef4444', // red
+    '#8b5cf6', // purple
+    '#ec4899', // pink
+    '#06b6d4', // cyan
+    '#f97316', // orange
+  ];
 
   // Font sizes for export
   const fontSize = {
@@ -56,9 +155,8 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
     axisLabel: isExport ? 14 : 11,
     legendText: isExport ? 16 : 12,
   };
-  const chartColors = config.theme.colors.slice(1);
 
-  const handleSelect = (type: ChartType | string, extraSettings = {}) => {
+  const handleSelect = (type: ChartType | string, extraSettings: any = {}) => {
     const newData = { type: type as ChartType, settings: extraSettings, title: blockTitle };
     setChartType(type as ChartType);
     setSettings(extraSettings);
@@ -71,17 +169,18 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
     if (onSave) onSave({ type: chartType!, settings, title: blockTitle });
   };
 
-  const data: LineChartDataPoint[] = useMemo(
-    () => [
-      { name: 'Jan', val: 4000, val2: 2400 },
-      { name: 'Feb', val: 3000, val2: 1398 },
-      { name: 'Mar', val: 2000, val2: 9800 },
-      { name: 'Apr', val: 2780, val2: 3908 },
-      { name: 'May', val: 1890, val2: 4800 },
-      { name: 'Jun', val: 2390, val2: 3800 },
-    ],
-    [],
-  );
+  // Generate data based on chart configuration
+  const lineData = useMemo(() => {
+    const dimension = settings?.dimension || 'months';
+    const metrics = settings?.metrics || ['followers', 'engagements'];
+    return generateLineChartData(dimension, metrics);
+  }, [settings?.dimension, settings?.metrics]);
+
+  const barData = useMemo(() => {
+    const barCategory = settings?.barCategory || 'daily_performance';
+    const barMetrics = settings?.barMetrics || ['engagement', 'followers'];
+    return generateBarChartData(barCategory, barMetrics);
+  }, [settings?.barCategory, settings?.barMetrics]);
 
   const pieData: PieChartDataPoint[] = useMemo(
     () => [
@@ -95,13 +194,13 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
 
   const postsData: PostData[] = useMemo(() => {
     const images = ['/1.png', '/2.png', '/3.png', '/4.png', '/5.png'];
-    return Array.from({ length: settings.count || 3 }).map((_, i) => ({
+    return Array.from({ length: settings?.count || 3 }).map((_, i) => ({
       id: i,
       reach: 12000 + i * 1500,
       eng: 450 + i * 50,
       image: images[i % images.length],
     }));
-  }, [settings.count]);
+  }, [settings?.count]);
 
   const renderContent = () => {
     if (!chartType) {
@@ -172,9 +271,9 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
         <ChartWrapper>
           <div
             className={`w-full h-full grid gap-2 ${
-              settings.count === 2
+              settings?.count === 2
                 ? 'grid-cols-2'
-                : settings.count === 3
+                : settings?.count === 3
                   ? 'grid-cols-3'
                   : 'grid-cols-2 grid-rows-2'
             }`}
@@ -222,12 +321,16 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
       );
     }
 
+    // Get metrics for rendering
+    const lineMetrics = settings?.metrics || ['followers', 'engagements'];
+    const barMetrics = settings?.barMetrics || ['engagement', 'followers'];
+
     return (
       <ChartWrapper>
         <div className={`w-full h-full ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
           <ResponsiveContainer width="100%" height="100%">
             {chartType === 'line' ? (
-              <LineChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <LineChart data={lineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid
                   strokeDasharray="3 3"
                   stroke={isDark ? '#334155' : '#e2e8f0'}
@@ -253,24 +356,33 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
                     backgroundColor: isDark ? '#1e293b' : '#ffffff',
                     color: isDark ? '#e2e8f0' : '#1f2937',
                   }}
+                  formatter={(value, name) => [
+                    typeof value === 'number' ? value.toLocaleString() : String(value),
+                    METRIC_LABELS[name as string] || name,
+                  ]}
                 />
-                <Line
-                  type="monotone"
-                  dataKey="val"
-                  stroke={colorPrimary}
-                  strokeWidth={2}
-                  dot={{ r: 3 }}
+                <Legend
+                  verticalAlign="top"
+                  height={24}
+                  iconType="line"
+                  iconSize={12}
+                  wrapperStyle={{ fontSize: '10px' }}
+                  formatter={(value) => METRIC_LABELS[value] || value}
                 />
-                <Line
-                  type="monotone"
-                  dataKey="val2"
-                  stroke={chartColors[1]}
-                  strokeWidth={2}
-                  dot={{ r: 3 }}
-                />
+                {lineMetrics.map((metric: string, idx: number) => (
+                  <Line
+                    key={metric}
+                    type="monotone"
+                    dataKey={metric}
+                    stroke={metricColors[idx % metricColors.length]}
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    name={metric}
+                  />
+                ))}
               </LineChart>
-            ) : chartType === 'column' ? (
-              <BarChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+            ) : chartType === 'bar' && settings?.barOrientation === 'vertical' ? (
+              <BarChart data={barData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid
                   strokeDasharray="3 3"
                   stroke={isDark ? '#334155' : '#e2e8f0'}
@@ -296,14 +408,33 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
                     backgroundColor: isDark ? '#1e293b' : '#ffffff',
                     color: isDark ? '#e2e8f0' : '#1f2937',
                   }}
+                  formatter={(value, name) => [
+                    typeof value === 'number' ? value.toLocaleString() : String(value),
+                    METRIC_LABELS[name as string] || name,
+                  ]}
                 />
-                <Bar dataKey="val" fill={colorPrimary} radius={[4, 4, 0, 0]} />
+                <Legend
+                  verticalAlign="top"
+                  height={24}
+                  iconType="square"
+                  iconSize={10}
+                  wrapperStyle={{ fontSize: '10px' }}
+                  formatter={(value) => METRIC_LABELS[value] || value}
+                />
+                {barMetrics.map((metric: string, idx: number) => (
+                  <Bar
+                    key={metric}
+                    dataKey={metric}
+                    fill={metricColors[idx % metricColors.length]}
+                    name={metric}
+                  />
+                ))}
               </BarChart>
             ) : chartType === 'bar' ? (
               <BarChart
                 layout="vertical"
-                data={data}
-                margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                data={barData}
+                margin={{ top: 10, right: 10, left: 10, bottom: 0 }}
               >
                 <CartesianGrid
                   strokeDasharray="3 3"
@@ -322,7 +453,7 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
                   tick={{ fontSize: fontSize.axisLabel, fill: isDark ? '#94a3b8' : '#64748b' }}
                   axisLine={false}
                   tickLine={false}
-                  width={30}
+                  width={70}
                 />
                 <Tooltip
                   contentStyle={{
@@ -333,10 +464,30 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
                     backgroundColor: isDark ? '#1e293b' : '#ffffff',
                     color: isDark ? '#e2e8f0' : '#1f2937',
                   }}
+                  formatter={(value, name) => [
+                    typeof value === 'number' ? value.toLocaleString() : String(value),
+                    METRIC_LABELS[name as string] || name,
+                  ]}
                 />
-                <Bar dataKey="val" fill={colorPrimary} radius={[0, 4, 4, 0]} barSize={20} />
+                <Legend
+                  verticalAlign="top"
+                  height={24}
+                  iconType="square"
+                  iconSize={10}
+                  wrapperStyle={{ fontSize: '10px' }}
+                  formatter={(value) => METRIC_LABELS[value] || value}
+                />
+                {barMetrics.map((metric: string, idx: number) => (
+                  <Bar
+                    key={metric}
+                    dataKey={metric}
+                    fill={metricColors[idx % metricColors.length]}
+                    name={metric}
+                    barSize={16}
+                  />
+                ))}
               </BarChart>
-            ) : (
+            ) : chartType === 'pie' ? (
               <PieChart margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
                 <Pie
                   data={pieData}
@@ -361,7 +512,7 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
                   labelLine={false}
                 >
                   {pieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={chartColors[index % chartColors.length]} />
+                    <Cell key={`cell-${index}`} fill={metricColors[index % metricColors.length]} />
                   ))}
                 </Pie>
                 <Tooltip
@@ -381,7 +532,7 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
                   wrapperStyle={{ fontSize: '10px' }}
                 />
               </PieChart>
-            )}
+            ) : null}
           </ResponsiveContainer>
         </div>
       </ChartWrapper>

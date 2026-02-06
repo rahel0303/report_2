@@ -1,25 +1,21 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import PptxGenJS from 'pptxgenjs';
 import {
   Settings,
   Layout,
   Palette,
   ChevronRight,
-  MonitorPlay,
-  CheckCircle2,
   ArrowLeft,
   MousePointerClick,
   Edit3,
   ChevronDown,
   X,
   Plus,
-  Loader2,
   Download,
   Presentation,
   FileText,
-  Minus,
+  CheckCircle2,
 } from 'lucide-react';
 
 // Import types
@@ -31,15 +27,39 @@ import fontsData from './data/fonts.json';
 import clientsData from './data/clients.json';
 import { getDummyDataForTemplate } from './data/dummyData';
 
-const themesData = themesDataRaw as ThemePreset[];
-
-// Import slide components
-import { PlaceholderSlide, ReportCoverVisual, InstagramDashboardSlide } from './components/slides';
-// Import layout components
+// Import components
+import { AppHeader, Toasts } from './components/report';
+import { PlaceholderSlide, ReportCoverVisual, InstagramDashboardSlide, SectionHeadingSlide } from './components/slides';
 import { LayoutDashboard, LayoutComparison, LayoutKPI, LayoutContent } from './components/layouts';
-// Import cover designer
 import { CoverDesigner } from './components/covers/CoverDesigner';
 import { CustomCover } from './components/covers/CustomCover';
+import {
+  TemplateModal,
+  SaveModal,
+  LoadModal,
+  LoadReportsModal,
+  TemplateSelectionModal,
+  ExitModal,
+  SlideTypeSelectionModal,
+  ChannelSelectionModal,
+} from './components/report/modals';
+import type { SocialChannel } from './components/report/modals';
+
+// Import utilities
+import { LAYOUT_TEMPLATES, getPeriodOptions } from './constants/templates';
+import { handleDownload } from './utils/exportHelpers';
+import {
+  clearAllStorage,
+  clearCurrentWorkOnly,
+  getDefaultSlides,
+  getDefaultConfig,
+  loadSlidesFromStorage,
+  saveSlidesToStorage,
+  initializeDefaultTemplate,
+} from './utils/storageHelpers';
+import { renderSlide } from './utils/slideRenderer';
+
+const themesData = themesDataRaw as ThemePreset[];
 
 const ReportSetupInterface: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<
@@ -54,6 +74,9 @@ const ReportSetupInterface: React.FC = () => {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [activeSlideId, setActiveSlideId] = useState<number | null>(null);
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [isSlideTypeModalOpen, setIsSlideTypeModalOpen] = useState(false);
+  const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
+  const [selectedChannel, setSelectedChannel] = useState<SocialChannel | null>(null);
   const [isCompetitorDropdownOpen, setIsCompetitorDropdownOpen] = useState(false);
   const [isSaveDropdownOpen, setIsSaveDropdownOpen] = useState(false);
   const [isLoadDropdownOpen, setIsLoadDropdownOpen] = useState(false);
@@ -71,46 +94,15 @@ const ReportSetupInterface: React.FC = () => {
 
   // Load slides from localStorage on mount
   useEffect(() => {
-    const savedSlides = localStorage.getItem('report_slides');
-    if (savedSlides) {
-      try {
-        setSlides(JSON.parse(savedSlides));
-      } catch (error) {
-        console.error('Failed to load saved slides:', error);
-        // Set default slides if parse fails
-        setSlides([
-          { id: 1, type: 'cover', title: 'Report Cover', content: {} },
-          { id: 2, type: 'dashboard', title: 'Instagram Performance', content: {} },
-        ]);
-      }
-    } else {
-      // Set default slides
-      setSlides([
-        { id: 1, type: 'cover', title: 'Report Cover', content: {} },
-        { id: 2, type: 'dashboard', title: 'Instagram Performance', content: {} },
-      ]);
-    }
+    setSlides(loadSlidesFromStorage());
   }, []);
 
   // Auto-save slides to localStorage whenever they change
   useEffect(() => {
-    if (slides.length > 0) {
-      localStorage.setItem('report_slides', JSON.stringify(slides));
-    }
+    saveSlidesToStorage(slides);
   }, [slides]);
 
-  const [config, setConfig] = useState<ReportConfig>({
-    reportTitle: 'Social Media Report',
-    reportDetails: 'Monthly Performance & Strategy',
-    preparedBy: 'Sekata Data Team',
-    reportType: 'Monthly',
-    period: 'January 2026',
-    theme: themesData[0],
-    font: fontsData[0],
-    clientName: 'BYD',
-    selectedCompetitors: [],
-    coverDesign: undefined,
-  });
+  const [config, setConfig] = useState<ReportConfig>(getDefaultConfig());
 
   // Load config from localStorage on mount - ONLY if localStorage has it and state is default
   useEffect(() => {
@@ -136,26 +128,7 @@ const ReportSetupInterface: React.FC = () => {
 
   // Initialize default template in localStorage on first load
   useEffect(() => {
-    const existingTemplates = localStorage.getItem('report_templates');
-    if (!existingTemplates) {
-      // Create default template
-      const defaultTemplate = {
-        id: 'default-template-1',
-        name: 'Default Template',
-        savedAt: new Date().toISOString(),
-        templateData: {
-          theme: themesData[0],
-          font: fontsData[0],
-          coverDesign: undefined,
-        },
-        slides: [
-          { id: 1, type: 'cover', title: 'Report Cover', content: {} },
-          { id: 2, type: 'dashboard', title: 'Instagram Performance', content: {} },
-        ],
-      };
-      localStorage.setItem('report_templates', JSON.stringify([defaultTemplate]));
-      console.log('Default template created in localStorage');
-    }
+    initializeDefaultTemplate();
   }, []);
 
   const [previewMode, setPreviewMode] = useState<'cover' | 'content'>('cover');
@@ -167,6 +140,7 @@ const ReportSetupInterface: React.FC = () => {
     title: string,
     subtitle: string,
     period: string,
+    contentMode: 'light' | 'dark' = 'light',
   ) => {
     setConfig((prev) => ({
       ...prev,
@@ -177,36 +151,18 @@ const ReportSetupInterface: React.FC = () => {
         templateId,
         logoData,
         colors,
+        contentMode,
       },
     }));
     setCurrentStep('setup');
   };
 
-  const getPeriodOptions = (type: 'Monthly' | 'Quarterly'): string[] => {
-    const year = new Date().getFullYear();
-    if (type === 'Monthly')
-      return [
-        `January ${year}`,
-        `February ${year}`,
-        `March ${year}`,
-        `April ${year}`,
-        `May ${year}`,
-        `June ${year}`,
-        `July ${year}`,
-        `August ${year}`,
-        `September ${year}`,
-        `October ${year}`,
-        `November ${year}`,
-        `December ${year}`,
-      ];
-    return [`Q1 ${year}`, `Q2 ${year}`, `Q3 ${year}`, `Q4 ${year}`];
+  const resetToInitialState = () => {
+    clearCurrentWorkOnly();
+    setSlides(getDefaultSlides());
+    setConfig(getDefaultConfig());
+    setCurrentStep('setup');
   };
-
-  // REMOVED: Period validation useEffect that was resetting config
-  // useEffect(() => {
-  //   const opts = getPeriodOptions(config.reportType);
-  //   if (!opts.includes(config.period)) setConfig((prev) => ({ ...prev, period: opts[0] }));
-  // }, [config.reportType]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -232,10 +188,8 @@ const ReportSetupInterface: React.FC = () => {
   // Keyboard navigation for slides
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Only handle arrow keys when in edit mode
       if (currentStep !== 'edit_cover' && currentStep !== 'edit_generic') return;
 
-      // Check if user is typing in an input/textarea
       const target = event.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
         return;
@@ -256,43 +210,6 @@ const ReportSetupInterface: React.FC = () => {
     };
   }, [currentStep, activeSlideId, slides]);
 
-  const clearAllStorage = () => {
-    localStorage.removeItem('report_slides');
-    localStorage.removeItem('report_config');
-    localStorage.removeItem('report_templates');
-    localStorage.removeItem('saved_reports');
-  };
-
-  const clearCurrentWorkOnly = () => {
-    // Only clear current work, keep saved templates and reports
-    localStorage.removeItem('report_slides');
-    localStorage.removeItem('report_config');
-  };
-
-  const resetToInitialState = () => {
-    // Clear ONLY current work, NOT saved templates/reports
-    clearCurrentWorkOnly();
-    // Reset to default slides
-    setSlides([
-      { id: 1, type: 'cover', title: 'Report Cover', content: {} },
-      { id: 2, type: 'dashboard', title: 'Instagram Performance', content: {} },
-    ]);
-    // Reset config
-    setConfig({
-      reportTitle: 'Social Media Report',
-      reportDetails: 'Monthly Performance & Strategy',
-      preparedBy: 'Sekata Data Team',
-      reportType: 'Monthly',
-      period: 'January 2026',
-      theme: themesData[0],
-      font: fontsData[0],
-      clientName: 'BYD',
-      selectedCompetitors: [],
-      coverDesign: undefined,
-    });
-    setCurrentStep('setup');
-  };
-
   const goNext = () => {
     setCurrentStep('review');
     window.scrollTo(0, 0);
@@ -308,115 +225,9 @@ const ReportSetupInterface: React.FC = () => {
     }, 1500);
   };
 
-  const handleDownload = async (format: string) => {
+  const handleDownloadWrapper = async (format: string) => {
     setIsDownloadOpen(false);
-    setIsExporting(true);
-
-    try {
-      if (format === 'pdf') {
-        alert('PDF export coming soon. Please use PowerPoint export for now.');
-        setIsExporting(false);
-        return;
-      } else if (format === 'pptx') {
-        const PptxGenJS = (await import('pptxgenjs')).default;
-        const { toPng } = await import('html-to-image');
-
-        const pptx = new PptxGenJS();
-        pptx.layout = 'LAYOUT_16x9';
-        pptx.author = config.preparedBy;
-        pptx.title = config.reportTitle;
-
-        console.log('📸 Capturing slides as images...');
-
-        for (let i = 0; i < slides.length; i++) {
-          const slide = slides[i];
-          console.log(`📸 Capturing slide ${i + 1}/${slides.length}: ${slide.title}`);
-
-          // Find the hidden export div for this slide
-          const exportDiv = document.querySelector(
-            `[data-slide-id="${slide.id}"][data-slide-export="true"]`,
-          ) as HTMLElement;
-
-          if (!exportDiv) {
-            console.error(`Export div not found for slide ${slide.id}`);
-            continue;
-          }
-
-          // Wait for charts and content to render
-          await new Promise((resolve) => setTimeout(resolve, 500));
-
-          try {
-            // Capture the slide directly as PNG without moving DOM elements
-            const imgData = await toPng(exportDiv, {
-              cacheBust: true,
-              width: 1920,
-              height: 1080,
-              backgroundColor: '#ffffff',
-              pixelRatio: 2,
-              filter: (node) => {
-                // Skip script tags and other non-visual elements
-                if (node.nodeName === 'SCRIPT') return false;
-                if (node.nodeName === 'NOSCRIPT') return false;
-                return true;
-              },
-              style: {
-                transform: 'scale(1)',
-                transformOrigin: 'top left',
-                position: 'relative',
-                left: '0',
-                top: '0',
-                margin: '0',
-                padding: '0',
-              },
-            });
-
-            // Create PPTX slide and add the image
-            const pptxSlide = pptx.addSlide();
-            pptxSlide.addImage({
-              data: imgData,
-              x: 0,
-              y: 0,
-              w: '100%',
-              h: '100%',
-            });
-
-            console.log(`✅ Slide ${i + 1} captured successfully`);
-          } catch (error) {
-            console.error(`Error capturing slide ${i + 1}:`, error);
-            // Add error placeholder slide
-            const pptxSlide = pptx.addSlide();
-            pptxSlide.addText(`Error capturing: ${slide.title}`, {
-              x: 1,
-              y: 2.5,
-              w: 8,
-              h: 0.5,
-              fontSize: 24,
-              color: 'FF0000',
-              align: 'center',
-            });
-          }
-        }
-
-        // Save file
-        const fileName = `${config.reportTitle.replace(/\s+/g, '_')}_${config.period}.pptx`;
-        await pptx.writeFile({ fileName });
-
-        console.log('🎉 Export completed with screenshots!');
-        alert(
-          `✓ Successfully exported: ${fileName}\n\n📸 All slides captured as high-quality images!`,
-        );
-      }
-
-      setIsExporting(false);
-      setShowExportToast(true);
-      setTimeout(() => setShowExportToast(false), 3000);
-    } catch (error) {
-      console.error('Export error:', error);
-      setIsExporting(false);
-      alert(
-        `Export failed: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`,
-      );
-    }
+    await handleDownload(format, slides, config, setIsExporting, setShowExportToast);
   };
 
   const goToSlide = (id: number) => {
@@ -479,92 +290,100 @@ const ReportSetupInterface: React.FC = () => {
     }
   };
 
-  const handleSaveAsTemplate = (name: string) => {
+  const handleSaveAsTemplate = async (name: string) => {
     console.log('Saving template structure, current slides:', slides);
 
-    const template = {
-      id: Date.now().toString(),
-      name,
-      savedAt: new Date().toISOString(),
-      templateData: {
-        theme: config.theme,
-        font: config.font,
-        coverDesign: config.coverDesign,
-      },
-      slides: slides.map((slide) => {
-        // Save content structure (which keys exist) with metadata
-        let contentStructure: any = {};
+    const templateSlides = slides.map((slide) => {
+      let contentStructure: any = {};
 
-        if (slide.content && typeof slide.content === 'object') {
-          Object.keys(slide.content).forEach((key) => {
-            const value = slide.content[key];
-
-            // Check if the field has actual data (not empty)
-            if (value && typeof value === 'object' && Object.keys(value).length > 0) {
-              // For charts, save structure metadata
-              if ((key === 'chart' || key.startsWith('chart_')) && value.chartType) {
-                contentStructure[key] = {
-                  chartType: value.chartType,
-                  dataLength: value.data?.length || 4, // Save number of data points
-                };
-              } else {
-                contentStructure[key] = {}; // Mark this field as "should be filled"
-              }
+      if (slide.content && typeof slide.content === 'object') {
+        Object.keys(slide.content).forEach((key) => {
+          const value = slide.content[key];
+          if (value && typeof value === 'object' && Object.keys(value).length > 0) {
+            if ((key === 'chart' || key.startsWith('chart_')) && value.chartType) {
+              contentStructure[key] = {
+                chartType: value.chartType,
+                dataLength: value.data?.length || 4,
+              };
+            } else {
+              contentStructure[key] = {};
             }
-          });
-        }
+          }
+        });
+      }
 
-        console.log(`Slide ${slide.id} structure:`, contentStructure);
+      return {
+        id: slide.id,
+        type: slide.type,
+        title: slide.title,
+        content: contentStructure,
+      };
+    });
 
-        return {
-          id: slide.id,
-          type: slide.type,
-          title: slide.title,
-          content: contentStructure,
-        };
-      }),
-    };
+    try {
+      const response = await fetch('/api/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          slides: templateSlides,
+          config: {
+            theme: config.theme,
+            font: config.font,
+            coverDesign: config.coverDesign,
+          },
+          reportType: 'template',
+        }),
+      });
 
-    const existingTemplates = JSON.parse(localStorage.getItem('report_templates') || '[]');
-    const updatedTemplates = [...existingTemplates, template];
-    localStorage.setItem('report_templates', JSON.stringify(updatedTemplates));
+      if (!response.ok) throw new Error('Gagal menyimpan template');
 
-    console.log('Template saved:', template);
-    console.log('Template slides with content:', template.slides);
-    console.log('All templates:', updatedTemplates);
-
-    setIsSaveModalOpen(false);
-    alert(`Template "${name}" saved successfully!`);
-    resetToInitialState();
+      setIsSaveModalOpen(false);
+      alert(`Template "${name}" berhasil disimpan!`);
+      resetToInitialState();
+    } catch (error) {
+      console.error('Save template error:', error);
+      alert('Gagal menyimpan template');
+    }
   };
 
-  const handleSaveAsReport = (name: string) => {
-    const report = {
-      id: Date.now().toString(),
-      name,
-      savedAt: new Date().toISOString(),
-      config: config, // Simpan SEMUA config
-      slides: slides, // Simpan SEMUA slides dengan content
-    };
+  const handleSaveAsReport = async (name: string) => {
+    try {
+      const response = await fetch('/api/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          slides: slides,
+          config: config,
+          reportType: 'report',
+        }),
+      });
 
-    const existingReports = JSON.parse(localStorage.getItem('saved_reports') || '[]');
-    localStorage.setItem('saved_reports', JSON.stringify([...existingReports, report]));
+      if (!response.ok) throw new Error('Gagal menyimpan report');
 
-    setIsSaveModalOpen(false);
-    alert(`Report "${name}" saved successfully!`);
-    resetToInitialState();
+      setIsSaveModalOpen(false);
+      alert(`Report "${name}" berhasil disimpan!`);
+      resetToInitialState();
+    } catch (error) {
+      console.error('Save report error:', error);
+      alert('Gagal menyimpan report');
+    }
   };
 
   const handleLoadTemplate = (template: any) => {
-    if (confirm('Load this template? Current unsaved changes will be lost.')) {
+    if (confirm('Muat template ini? Perubahan yang belum disimpan akan hilang.')) {
       console.log('🔵 Loading template structure:', template);
       console.log('🔵 Current selected brand:', config.clientName);
 
+      // Template dari API memiliki struktur berbeda (config langsung, bukan templateData)
+      const templateConfig = template.config || template.templateData || {};
+
       setConfig((prev) => ({
         ...prev,
-        theme: template.templateData.theme,
-        font: template.templateData.font,
-        coverDesign: prev.coverDesign || template.templateData.coverDesign,
+        theme: templateConfig.theme || prev.theme,
+        font: templateConfig.font || prev.font,
+        coverDesign: prev.coverDesign || templateConfig.coverDesign,
       }));
 
       const loadedSlides = template.slides.map((slide: any) => {
@@ -646,30 +465,41 @@ const ReportSetupInterface: React.FC = () => {
   };
 
   const handleLoadReport = (report: any) => {
-    if (confirm('Load this report? Current unsaved changes will be lost.')) {
+    if (confirm('Muat report ini? Perubahan yang belum disimpan akan hilang.')) {
       setConfig(report.config);
       setSlides(report.slides);
       setIsLoadModalOpen(false);
+      setIsLoadReportsModalOpen(false);
       setCurrentStep('review');
     }
   };
 
-  const handleDeleteSaved = (id: string, type: 'template' | 'report') => {
-    if (confirm('Delete this saved item?')) {
-      const key = type === 'template' ? 'report_templates' : 'saved_reports';
-      const items = JSON.parse(localStorage.getItem(key) || '[]');
-      localStorage.setItem(key, JSON.stringify(items.filter((item: any) => item.id !== id)));
-      // Force re-render
-      setIsLoadModalOpen(false);
-      setTimeout(() => setIsLoadModalOpen(true), 0);
+  const handleDeleteSaved = async (id: string, type: 'template' | 'report') => {
+    try {
+      const response = await fetch(`/api/reports/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) throw new Error('Gagal menghapus');
+    } catch (error) {
+      console.error('Delete error:', error);
+      throw error;
     }
   };
 
   const handleSlideContentChange = (slideId: number, key: string, value: any) => {
     setSlides((prev) =>
-      prev.map((slide) =>
-        slide.id === slideId ? { ...slide, content: { ...slide.content, [key]: value } } : slide,
-      ),
+      prev.map((slide) => {
+        if (slide.id === slideId) {
+          const updatedSlide = { ...slide, content: { ...slide.content, [key]: value } };
+          // Sync section title to slide title for consistency in review grid
+          if (key === 'sectionTitle' && typeof value === 'string') {
+            updatedSlide.title = value;
+          }
+          return updatedSlide;
+        }
+        return slide;
+      }),
     );
     // Show brief save indicator (optional)
     console.log('✓ Changes auto-saved');
@@ -695,21 +525,50 @@ const ReportSetupInterface: React.FC = () => {
       layout_content: 'Creative Analysis',
     };
 
+    const channelNames: Record<SocialChannel, string> = {
+      instagram: 'Instagram',
+      facebook: 'Facebook',
+      twitter: 'Twitter/X',
+      tiktok: 'TikTok',
+      youtube: 'YouTube',
+    };
+
     setSlides(
       slides.map((s) => {
         if (s.id === activeSlideId) {
           const isGenericTitle = s.title.startsWith('New Slide');
+          const channelSuffix = selectedChannel ? ` - ${channelNames[selectedChannel]}` : '';
           return {
             ...s,
             type: templateType as any,
-            title: isGenericTitle ? templateMap[templateType] : s.title,
-            content: {}, // Keep empty for manual filling
+            title: isGenericTitle ? `${templateMap[templateType]}${channelSuffix}` : s.title,
+            content: {
+              channel: selectedChannel, // Store selected channel
+            },
           };
         }
         return s;
       }),
     );
     setIsTemplateModalOpen(false);
+    setSelectedChannel(null); // Reset after use
+  };
+
+  const handleSectionHeadingSelect = () => {
+    setSlides(
+      slides.map((s) => {
+        if (s.id === activeSlideId) {
+          return {
+            ...s,
+            type: 'section_heading' as any,
+            title: 'Section Heading',
+            content: { sectionTitle: 'Section Title' },
+          };
+        }
+        return s;
+      }),
+    );
+    setIsSlideTypeModalOpen(false);
   };
 
   const handleClientChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -738,278 +597,70 @@ const ReportSetupInterface: React.FC = () => {
     const activeSlide = slides.find((s) => s.id === activeSlideId);
     if (!activeSlide) return null;
 
-    const mode = 'full';
     const currentIndex = slides.findIndex((s) => s.id === activeSlide.id);
     const currentPage = currentIndex + 1;
     const totalPages = slides.length;
 
-    // Render based on slide type
-    switch (activeSlide.type) {
-      case 'cover':
-        return config.coverDesign ? (
-          <CustomCover config={config} />
-        ) : (
-          <ReportCoverVisual config={config} mode={mode} />
-        );
-      case 'dashboard':
-        return (
-          <InstagramDashboardSlide
-            key={`instagram-${config.clientName}-${config.period}`}
-            config={config}
-            currentPage={currentPage}
-            totalPages={totalPages}
-          />
-        );
-      case 'layout_dashboard':
-        return (
-          <LayoutDashboard
-            key={`dashboard-${config.clientName}-${config.period}`}
-            config={config}
-            data={activeSlide.content}
-            onUpdate={(key, value) => handleSlideContentChange(activeSlide.id, key, value)}
-            currentPage={currentPage}
-            totalPages={totalPages}
-          />
-        );
-      case 'layout_comparison':
-        return (
-          <LayoutComparison
-            key={`comparison-${config.clientName}-${config.period}`}
-            config={config}
-            data={activeSlide.content}
-            onUpdate={(key, value) => handleSlideContentChange(activeSlide.id, key, value)}
-            currentPage={currentPage}
-            totalPages={totalPages}
-          />
-        );
-      case 'layout_kpi':
-        return (
-          <LayoutKPI
-            key={`kpi-${config.clientName}-${config.period}`}
-            config={config}
-            data={activeSlide.content}
-            onUpdate={(key, value) => handleSlideContentChange(activeSlide.id, key, value)}
-            currentPage={currentPage}
-            totalPages={totalPages}
-          />
-        );
-      case 'layout_content':
-        return (
-          <LayoutContent
-            key={`content-${config.clientName}-${config.period}`}
-            config={config}
-            data={activeSlide.content}
-            onUpdate={(key, value) => handleSlideContentChange(activeSlide.id, key, value)}
-            currentPage={currentPage}
-            totalPages={totalPages}
-          />
-        );
-      case 'placeholder':
-      default:
-        return <PlaceholderSlide onOpenSelector={() => setIsTemplateModalOpen(true)} />;
+    if (activeSlide.type === 'placeholder') {
+      return <PlaceholderSlide onOpenSelector={() => setIsSlideTypeModalOpen(true)} />;
     }
+
+    return renderSlide(activeSlide, config, 'full', currentPage, totalPages, (key, value) =>
+      handleSlideContentChange(activeSlide.id, key, value),
+    );
   };
 
   const renderSlideThumbnail = (slide: Slide) => {
-    // Render based on slide type - full size for accurate preview
-    switch (slide.type) {
-      case 'cover':
-        return config.coverDesign ? (
-          <CustomCover config={config} key={`cover-${config.clientName}-${config.period}`} />
-        ) : (
-          <ReportCoverVisual
-            config={config}
-            mode="full"
-            key={`cover-${config.clientName}-${config.period}`}
-          />
-        );
-      case 'dashboard':
-        return (
-          <InstagramDashboardSlide
-            config={config}
-            isThumbnail={false}
-            key={`thumb-dashboard-${config.clientName}`}
-          />
-        );
-      case 'layout_dashboard':
-        return (
-          <LayoutDashboard
-            config={config}
-            data={slide.content}
-            key={`thumb-layout-dash-${config.clientName}`}
-          />
-        );
-      case 'layout_comparison':
-        return (
-          <LayoutComparison
-            config={config}
-            data={slide.content}
-            key={`thumb-layout-comp-${config.clientName}`}
-          />
-        );
-      case 'layout_kpi':
-        return (
-          <LayoutKPI
-            config={config}
-            data={slide.content}
-            key={`thumb-layout-kpi-${config.clientName}`}
-          />
-        );
-      case 'layout_content':
-        return (
-          <LayoutContent
-            config={config}
-            data={slide.content}
-            key={`thumb-layout-content-${config.clientName}`}
-          />
-        );
-      case 'placeholder':
-      default:
-        return (
-          <div className="w-full h-full bg-slate-50 flex items-center justify-center flex-col gap-2 p-4">
-            <Layout size={24} className="text-slate-300" />
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              {slide.type}
-            </span>
-          </div>
-        );
-    }
+    return renderSlide(slide, config, 'thumbnail');
   };
 
-  const templates: Template[] = [
-    {
-      id: 'layout_dashboard',
-      name: 'Standard Dashboard',
-      icon: Layout,
-      desc: 'Chart, Key Insights & Data Table',
-    },
-    {
-      id: 'layout_comparison',
-      name: 'Comparison View',
-      icon: Layout,
-      desc: 'Side-by-side Metric Analysis',
-    },
-    {
-      id: 'layout_kpi',
-      name: 'KPI Overview',
-      icon: Layout,
-      desc: 'Top Metrics with Deep Dive Area',
-    },
-    {
-      id: 'layout_content',
-      name: 'Visual Analysis',
-      icon: Layout,
-      desc: 'Media / Screenshot & Analysis',
-    },
-  ];
+  const templates: Template[] = LAYOUT_TEMPLATES;
 
   const CLIENT_DATA = clientsData as Record<string, string[]>;
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800 pb-20 relative">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm h-16">
-        <div className="max-w-7xl mx-auto px-6 h-full flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <div className="bg-slate-900 text-white p-1.5 rounded-lg">
-              <MonitorPlay size={20} />
-            </div>
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-              AutoReport <span className="text-slate-400 font-normal">Generator</span>
-            </h1>
-          </div>
-          <div className="flex items-center gap-3">
-            {/* Auto-save indicator */}
-            <div className="flex items-center gap-1.5 text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded">
-              <CheckCircle2 size={12} />
-              <span className="font-medium">Auto-saved</span>
-            </div>
-
-            {currentStep === 'setup' && (
-              <span className="px-3 py-1 rounded bg-blue-50 text-blue-700 text-xs font-bold">
-                Step 1: Setup
-              </span>
-            )}
-            {currentStep === 'review' && (
-              <span className="px-3 py-1 rounded bg-blue-50 text-blue-700 text-xs font-bold">
-                Step 2: Review
-              </span>
-            )}
-            {currentStep.startsWith('edit') && (
-              <span className="px-3 py-1 rounded bg-blue-50 text-blue-700 text-xs font-bold">
-                Step 3: Editing
-              </span>
-            )}
-          </div>
-        </div>
-      </header>
+      <AppHeader currentStep={currentStep} />
 
       {/* TOASTS */}
-      {showSaveToast && (
-        <div className="fixed top-20 right-6 z-50 bg-emerald-600 text-white px-4 py-3 rounded-lg shadow-xl flex items-center gap-3 animate-in slide-in-from-right fade-in duration-300">
-          <CheckCircle2 size={20} />
-          <div>
-            <h4 className="font-bold text-sm">Report Saved</h4>
-            <p className="text-xs opacity-90">Returning to setup...</p>
-          </div>
-        </div>
-      )}
-      {isExporting && (
-        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-6 py-4 rounded-lg shadow-xl flex items-center gap-4">
-          <Loader2 size={24} className="animate-spin text-blue-400" />
-          <div>
-            <h4 className="font-bold text-sm">Generating File...</h4>
-            <p className="text-xs text-slate-400">Capturing slides & compiling assets</p>
-          </div>
-        </div>
-      )}
-      {showExportToast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-blue-600 text-white px-6 py-4 rounded-lg shadow-xl flex items-center gap-3">
-          <Download size={24} />
-          <div>
-            <h4 className="font-bold text-sm">Download Complete</h4>
-            <p className="text-xs opacity-90">Your file has been generated successfully.</p>
-          </div>
-        </div>
-      )}
+      <Toasts
+        showSaveToast={showSaveToast}
+        isExporting={isExporting}
+        showExportToast={showExportToast}
+      />
+
+      {/* SLIDE TYPE SELECTION MODAL */}
+      <SlideTypeSelectionModal
+        isOpen={isSlideTypeModalOpen}
+        onClose={() => setIsSlideTypeModalOpen(false)}
+        onSelectSectionHeading={handleSectionHeadingSelect}
+        onSelectContentTemplate={() => {
+          setIsSlideTypeModalOpen(false);
+          setIsChannelModalOpen(true);
+        }}
+      />
+
+      {/* CHANNEL SELECTION MODAL */}
+      <ChannelSelectionModal
+        isOpen={isChannelModalOpen}
+        onClose={() => {
+          setIsChannelModalOpen(false);
+          setSelectedChannel(null);
+        }}
+        onSelect={(channel) => {
+          setSelectedChannel(channel);
+          setIsChannelModalOpen(false);
+          setIsTemplateModalOpen(true);
+        }}
+      />
 
       {/* TEMPLATE MODAL */}
-      {isTemplateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-2xl border border-slate-200">
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h3 className="text-xl font-bold text-slate-900">Choose Layout</h3>
-                <p className="text-sm text-slate-500">Select a starting point for your analysis.</p>
-              </div>
-              <button
-                onClick={() => setIsTemplateModalOpen(false)}
-                className="p-2 hover:bg-slate-100 rounded-full text-slate-500"
-              >
-                <Minus size={20} />
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              {templates.map((tmpl) => (
-                <button
-                  key={tmpl.id}
-                  onClick={() => handleTemplateSelect(tmpl.id)}
-                  className="flex items-start gap-4 p-4 rounded-xl border border-slate-200 hover:border-blue-500 hover:bg-blue-50/50 hover:shadow-md transition-all text-left group"
-                >
-                  <div className="p-3 bg-blue-100 rounded-lg text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                    <tmpl.icon size={24} />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-slate-800 group-hover:text-blue-700">
-                      {tmpl.name}
-                    </h4>
-                    <p className="text-xs text-slate-500 mt-1">{tmpl.desc}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      <TemplateModal
+        isOpen={isTemplateModalOpen}
+        onClose={() => setIsTemplateModalOpen(false)}
+        onSelect={handleTemplateSelect}
+        templates={templates}
+      />
 
       <main className="max-w-7xl mx-auto px-6 py-8">
         {/* SETUP STEP */}
@@ -1063,43 +714,6 @@ const ReportSetupInterface: React.FC = () => {
                         className="group-hover:translate-x-1 transition-transform"
                       />
                     </button>
-                  </div>
-
-                  {/* Theme Selection */}
-                  <div>
-                    <label className="text-xs font-bold uppercase text-slate-400 mb-2 block flex items-center gap-2">
-                      <Palette size={12} /> Select Theme
-                    </label>
-                    <div className="grid grid-cols-2 gap-3 mb-4">
-                      {themesData.map((preset) => (
-                        <button
-                          key={preset.id}
-                          onClick={() => setConfig({ ...config, theme: preset })}
-                          className={`p-2 rounded-lg border text-left transition-all ${
-                            config.theme.id === preset.id
-                              ? 'border-slate-800 ring-1 ring-slate-800 bg-slate-50 shadow-sm'
-                              : 'border-slate-200 hover:border-slate-300 bg-white'
-                          }`}
-                        >
-                          <div className="flex justify-between items-center mb-2">
-                            <span className="text-xs font-bold">{preset.name}</span>
-                          </div>
-                          <div
-                            className={`flex h-3 w-full rounded-sm overflow-hidden ring-1 ring-black/5 ${
-                              preset.type === 'light' ? 'border border-slate-200' : ''
-                            }`}
-                          >
-                            {preset.colors.slice(0, 3).map((color: string, idx: number) => (
-                              <div
-                                key={idx}
-                                className="h-full flex-1"
-                                style={{ backgroundColor: color }}
-                              ></div>
-                            ))}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
                   </div>
 
                   {/* Font Selection */}
@@ -1207,7 +821,7 @@ const ReportSetupInterface: React.FC = () => {
                       <div className="relative">
                         <button
                           onClick={() => setIsCompetitorDropdownOpen(!isCompetitorDropdownOpen)}
-                          className="w-full border p-2 rounded text-sm bg-white flex justify-between items-center text-left min-h-[38px] hover:border-blue-400 transition-colors"
+                          className="w-full border p-2 rounded text-sm bg-white flex justify-between items-center text-left min-h-9.5 hover:border-blue-400 transition-colors"
                         >
                           <span
                             className={`truncate block ${
@@ -1359,7 +973,7 @@ const ReportSetupInterface: React.FC = () => {
                   </button>
                 </div>
               </div>
-              <div className="flex-grow flex items-center justify-center bg-slate-200/50 rounded-xl border border-slate-300 p-4 lg:p-12 overflow-hidden shadow-inner relative">
+              <div className="grow flex items-center justify-center bg-slate-200/50 rounded-xl border border-slate-300 p-4 lg:p-12 overflow-hidden shadow-inner relative">
                 <div className="w-full max-w-4xl aspect-video shadow-2xl rounded-lg overflow-hidden relative flex flex-col bg-white">
                   {/* Preview based on mode */}
                   {previewMode === 'cover' ? (
@@ -1415,7 +1029,7 @@ const ReportSetupInterface: React.FC = () => {
                   {isDownloadOpen && (
                     <div className="absolute top-full right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-20">
                       <button
-                        onClick={() => handleDownload('pdf')}
+                        onClick={() => handleDownloadWrapper('pdf')}
                         className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-3 transition-colors"
                       >
                         <div className="bg-red-50 text-red-500 p-1.5 rounded-lg">
@@ -1429,7 +1043,7 @@ const ReportSetupInterface: React.FC = () => {
                         </div>
                       </button>
                       <button
-                        onClick={() => handleDownload('pptx')}
+                        onClick={() => handleDownloadWrapper('pptx')}
                         className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-3 transition-colors border-t border-slate-50"
                       >
                         <div className="bg-orange-50 text-orange-500 p-1.5 rounded-lg">
@@ -1695,7 +1309,7 @@ const ReportSetupInterface: React.FC = () => {
       </main>
 
       {/* Hidden slides for export */}
-      <div className="fixed left-[-9999px] top-0">
+      <div className="fixed -left-2499.75 top-0">
         {slides.map((slide, index) => {
           const currentPage = index + 1;
           const totalPages = slides.length;
@@ -1757,6 +1371,12 @@ const ReportSetupInterface: React.FC = () => {
                   totalPages={totalPages}
                   isExport={true}
                 />
+              ) : slide.type === 'section_heading' ? (
+                <SectionHeadingSlide
+                  config={config}
+                  title={slide.content?.sectionTitle || slide.title || 'Section Title'}
+                  isExport={true}
+                />
               ) : (
                 <PlaceholderSlide onOpenSelector={() => {}} />
               )}
@@ -1766,138 +1386,21 @@ const ReportSetupInterface: React.FC = () => {
       </div>
 
       {/* Save Modal */}
-      {isSaveModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
-            <h3 className="text-xl font-bold mb-4">
-              {saveMode === 'template' ? 'Save as Template' : 'Save Report'}
-            </h3>
-            <p className="text-sm text-slate-600 mb-4">
-              {saveMode === 'template'
-                ? 'Save the structure/layout without data. You can reuse this template later.'
-                : 'Save the complete report with all data. You can continue editing later.'}
-            </p>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const name = (e.target as any).saveName.value;
-                if (saveMode === 'template') {
-                  handleSaveAsTemplate(name);
-                } else {
-                  handleSaveAsReport(name);
-                }
-              }}
-            >
-              <input
-                type="text"
-                name="saveName"
-                placeholder="Enter name..."
-                required
-                autoFocus
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none mb-4"
-              />
-              <div className="flex gap-2 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setIsSaveModalOpen(false)}
-                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium"
-                >
-                  Save
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <SaveModal
+        isOpen={isSaveModalOpen}
+        onClose={() => setIsSaveModalOpen(false)}
+        onSave={saveMode === 'template' ? handleSaveAsTemplate : handleSaveAsReport}
+        mode={saveMode}
+      />
 
       {/* Load Modal */}
-      {isLoadModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
-            <div className="p-6 border-b border-slate-200">
-              <h3 className="text-xl font-bold">
-                {loadMode === 'template' ? 'Load Template' : 'Load Saved Report'}
-              </h3>
-              <p className="text-sm text-slate-600 mt-1">
-                {loadMode === 'template'
-                  ? 'Select a template to load its structure'
-                  : 'Select a saved report to continue editing'}
-              </p>
-            </div>
-            <div className="flex-1 overflow-y-auto p-6">
-              {(() => {
-                const key = loadMode === 'template' ? 'report_templates' : 'saved_reports';
-                const items = JSON.parse(localStorage.getItem(key) || '[]');
-
-                if (items.length === 0) {
-                  return (
-                    <div className="text-center py-12 text-slate-400">
-                      <FileText size={48} className="mx-auto mb-3 opacity-50" />
-                      <p>No {loadMode === 'template' ? 'templates' : 'saved reports'} yet</p>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="space-y-3">
-                    {items.map((item: any) => (
-                      <div
-                        key={item.id}
-                        className="border border-slate-200 rounded-lg p-4 hover:border-blue-400 hover:bg-blue-50/50 transition-all group"
-                      >
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <h4 className="font-bold text-slate-900">{item.name}</h4>
-                            <p className="text-xs text-slate-500 mt-1">
-                              Saved: {new Date(item.savedAt).toLocaleString()}
-                            </p>
-                            <p className="text-xs text-slate-600 mt-1">
-                              {item.slides.length} slides
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() =>
-                                loadMode === 'template'
-                                  ? handleLoadTemplate(item)
-                                  : handleLoadReport(item)
-                              }
-                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium"
-                            >
-                              Load
-                            </button>
-                            <button
-                              onClick={() => handleDeleteSaved(item.id, loadMode)}
-                              className="px-2 py-1.5 text-red-500 hover:bg-red-50 rounded"
-                              title="Delete"
-                            >
-                              <X size={16} />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-            </div>
-            <div className="p-4 border-t border-slate-200">
-              <button
-                onClick={() => setIsLoadModalOpen(false)}
-                className="w-full px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <LoadModal
+        isOpen={isLoadModalOpen}
+        onClose={() => setIsLoadModalOpen(false)}
+        onLoad={loadMode === 'template' ? handleLoadTemplate : handleLoadReport}
+        onDelete={handleDeleteSaved}
+        mode={loadMode}
+      />
 
       {/* Template Selection Modal - Before entering review */}
       {isTemplateSelectionOpen && (
@@ -1914,7 +1417,6 @@ const ReportSetupInterface: React.FC = () => {
                   clearCurrentWorkOnly();
                   setSlides([
                     { id: 1, type: 'cover', title: 'Report Cover', content: {} },
-                    { id: 2, type: 'dashboard', title: 'Instagram Performance', content: {} },
                   ]);
                   // DON'T reset config - keep user's selections!
                   setIsTemplateSelectionOpen(false);
@@ -2012,87 +1514,11 @@ const ReportSetupInterface: React.FC = () => {
 
       {/* LOAD REPORTS MODAL */}
       {isLoadReportsModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-2xl border border-slate-200 max-h-[80vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h3 className="text-xl font-bold text-slate-900">Load Saved Reports</h3>
-                <p className="text-sm text-slate-500">Select a report to load</p>
-              </div>
-              <button
-                onClick={() => setIsLoadReportsModalOpen(false)}
-                className="p-2 hover:bg-slate-100 rounded-full text-slate-500"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {(() => {
-                const saved = localStorage.getItem('saved_reports');
-                const reports = saved ? JSON.parse(saved) : [];
-                return reports.length > 0 ? (
-                  reports.map((report: any, index: number) => (
-                    <button
-                      key={index}
-                      onClick={() => {
-                        handleLoadReport(report);
-                        setIsLoadReportsModalOpen(false);
-                      }}
-                      className="w-full p-4 border-2 border-slate-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-all text-left"
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="font-bold text-slate-900 mb-1">
-                            {report.config.reportTitle || 'Untitled Report'}
-                          </div>
-                          <div className="text-sm text-slate-600">
-                            Client: {report.config.clientName}
-                          </div>
-                          <div className="text-xs text-slate-400 mt-1">
-                            {report.slides.length} slides • Period: {report.config.period}
-                          </div>
-                        </div>
-                        <div className="text-blue-600">
-                          <ChevronRight size={20} />
-                        </div>
-                      </div>
-                    </button>
-                  ))
-                ) : (
-                  <div className="text-center py-12">
-                    <div className="text-slate-400 mb-2">
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="48"
-                        height="48"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="mx-auto mb-4"
-                      >
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                        <polyline points="14 2 14 8 20 8"></polyline>
-                      </svg>
-                    </div>
-                    <h4 className="font-bold text-slate-700 mb-1">No Reports Saved</h4>
-                    <p className="text-sm text-slate-500">Create and save a report first</p>
-                  </div>
-                );
-              })()}
-            </div>
-
-            <button
-              onClick={() => setIsLoadReportsModalOpen(false)}
-              className="w-full mt-6 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition"
-            >
-              Close
-            </button>
-          </div>
-        </div>
+        <LoadReportsModal
+          isOpen={isLoadReportsModalOpen}
+          onClose={() => setIsLoadReportsModalOpen(false)}
+          onLoad={handleLoadReport}
+        />
       )}
     </div>
   );
