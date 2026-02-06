@@ -1,25 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/app/lib/db';
 import { createSession, UserPayload } from '@/app/lib/auth';
+import bcrypt from 'bcryptjs';
 
-// Mock users untuk testing
-const MOCK_USERS = [
-  {
-    id: 1,
-    username: 'user1',
-    password: '123456',
-    name: 'User Demo 1',
-    role: 'user',
-    agency_id: 1,
-  },
-  {
-    id: 2,
-    username: 'admin',
-    password: 'admin123',
-    name: 'Admin',
-    role: 'admin',
-    agency_id: null,
-  },
-];
+interface User {
+  id: number;
+  name: string;
+  username: string;
+  password: string;
+  agency_id: number | null;
+  role: string;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -30,12 +21,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Username dan password harus diisi' }, { status: 400 });
     }
 
-    // Find user dari mock data
-    const user = MOCK_USERS.find(
-      (u) => u.username === username && u.password === password
+    // Query user dari database
+    const users = await query<User>(
+      `SELECT id, name, username, password, agency_id, role
+       FROM users
+       WHERE username = $1`,
+      [username],
     );
 
-    if (!user) {
+    if (users.length === 0) {
+      return NextResponse.json({ error: 'Username atau password salah' }, { status: 401 });
+    }
+
+    const user = users[0];
+
+    // Verifikasi password
+    const isValidPassword = await bcrypt.compare(password, user.password);
+
+    if (!isValidPassword) {
       return NextResponse.json({ error: 'Username atau password salah' }, { status: 401 });
     }
 
