@@ -16,15 +16,14 @@ async function testConnection() {
     console.log('✅ Connection successful!');
     console.log('Current time:', result.rows[0].now);
     console.log('PostgreSQL version:', result.rows[0].version);
-    
+
     // Test query users table
     console.log('\nTesting users table...');
     const users = await pool.query('SELECT id, username, name, role FROM users');
     console.log(`Found ${users.rows.length} users:`);
-    users.rows.forEach(user => {
+    users.rows.forEach((user) => {
       console.log(`  - ${user.username} (${user.name}) - Role: ${user.role}`);
     });
-    
   } catch (error) {
     console.error('❌ Connection failed:', error.message);
     console.error('Error details:', error);
