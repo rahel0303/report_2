@@ -158,11 +158,20 @@ export const ChartSelectionModal: React.FC<ChartSelectionModalProps> = ({
     }
   };
 
+  const MAX_LINE_METRICS = 2;
+
   const toggleMetric = (metricId: string, isLine: boolean) => {
     if (isLine) {
-      setSelectedLineMetrics((prev) =>
-        prev.includes(metricId) ? prev.filter((m) => m !== metricId) : [...prev, metricId],
-      );
+      setSelectedLineMetrics((prev) => {
+        if (prev.includes(metricId)) {
+          return prev.filter((m) => m !== metricId);
+        }
+        // Prevent adding more than MAX_LINE_METRICS
+        if (prev.length >= MAX_LINE_METRICS) {
+          return prev;
+        }
+        return [...prev, metricId];
+      });
     } else {
       setSelectedBarMetrics((prev) =>
         prev.includes(metricId) ? prev.filter((m) => m !== metricId) : [...prev, metricId],
@@ -359,34 +368,47 @@ export const ChartSelectionModal: React.FC<ChartSelectionModalProps> = ({
         {/* Step 3: Line Chart - Select Metrics */}
         {step === 3 && chartCategory === 'line' && (
           <div className="space-y-4">
+            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              Select up to {MAX_LINE_METRICS} metrics
+            </p>
             <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
               {LINE_METRICS.map((metric) => {
                 const IconComp = metric.icon;
                 const isSelected = selectedLineMetrics.includes(metric.id);
+                const isDisabled = !isSelected && selectedLineMetrics.length >= MAX_LINE_METRICS;
                 return (
                   <button
                     key={metric.id}
-                    onClick={() => toggleMetric(metric.id, true)}
+                    onClick={() => !isDisabled && toggleMetric(metric.id, true)}
+                    disabled={isDisabled}
                     className={`p-3 rounded-lg border flex items-center gap-2 transition-all text-left ${
                       isSelected
                         ? selectedButtonClass
-                        : isDark
-                          ? 'border-slate-700 hover:bg-slate-800 text-slate-400'
-                          : 'border-slate-200 hover:bg-slate-50 text-slate-600'
+                        : isDisabled
+                          ? isDark
+                            ? 'border-slate-800 bg-slate-800/50 text-slate-600 cursor-not-allowed opacity-50'
+                            : 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed opacity-50'
+                          : isDark
+                            ? 'border-slate-700 hover:bg-slate-800 text-slate-400'
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-600'
                     }`}
                   >
                     <div
                       className={`w-5 h-5 rounded border flex items-center justify-center text-xs ${
                         isSelected
                           ? 'bg-blue-500 border-blue-500 text-white'
-                          : isDark
-                            ? 'border-slate-600'
-                            : 'border-slate-300'
+                          : isDisabled
+                            ? isDark
+                              ? 'border-slate-700 bg-slate-700'
+                              : 'border-slate-300 bg-slate-200'
+                            : isDark
+                              ? 'border-slate-600'
+                              : 'border-slate-300'
                       }`}
                     >
                       {isSelected && '✓'}
                     </div>
-                    <IconComp size={14} className="opacity-60" />
+                    <IconComp size={14} className={isDisabled ? 'opacity-30' : 'opacity-60'} />
                     <span className="text-xs font-medium">{metric.label}</span>
                   </button>
                 );

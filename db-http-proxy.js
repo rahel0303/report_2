@@ -33,7 +33,7 @@ app.get('/health', async (req, res) => {
 app.post('/query', async (req, res) => {
   try {
     const { text, params } = req.body;
-    
+
     if (!text) {
       return res.status(400).json({ error: 'Query text is required' });
     }

@@ -29,7 +29,7 @@ const server = net.createServer((clientSocket) => {
   console.log('Client connected');
 
   const serverSocket = new net.Socket();
-  
+
   serverSocket.connect(DB_PORT, DB_HOST, () => {
     console.log(`Connected to database at ${DB_HOST}:${DB_PORT}`);
   });
@@ -70,7 +70,9 @@ server.listen(PROXY_PORT, '0.0.0.0', () => {
   console.log(`Database proxy server running on port ${PROXY_PORT}`);
   console.log(`Forwarding to ${DB_HOST}:${DB_PORT}`);
   console.log('\nTo expose this to internet:');
-  console.log(`  1. Install cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/`);
+  console.log(
+    `  1. Install cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/`,
+  );
   console.log(`  2. Run: cloudflared tunnel --url tcp://localhost:${PROXY_PORT}`);
   console.log(`  3. Use the provided URL as DB_HOST in Vercel`);
 });

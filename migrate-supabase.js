@@ -14,16 +14,16 @@ const pool = new Pool({
 async function migrate() {
   try {
     console.log('Connecting to Supabase...');
-    
+
     // Read schema file
     const schemaPath = path.join(__dirname, 'database', 'schema.sql');
     const schema = fs.readFileSync(schemaPath, 'utf8');
-    
+
     console.log('Running schema migration...');
     await pool.query(schema);
-    
+
     console.log('✅ Schema migration completed successfully!');
-    
+
     // Check if tables exist
     const result = await pool.query(`
       SELECT table_name 
@@ -31,10 +31,9 @@ async function migrate() {
       WHERE table_schema = 'public' 
       ORDER BY table_name;
     `);
-    
+
     console.log('\nCreated tables:');
-    result.rows.forEach(row => console.log(`  - ${row.table_name}`));
-    
+    result.rows.forEach((row) => console.log(`  - ${row.table_name}`));
   } catch (error) {
     console.error('❌ Migration error:', error.message);
     process.exit(1);
