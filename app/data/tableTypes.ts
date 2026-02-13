@@ -1,4 +1,4 @@
-import { Activity, CheckCircle2, BarChart2, ImageIcon, SlidersHorizontal } from 'lucide-react';
+import { Activity, CheckCircle2, BarChart2, ImageIcon, SlidersHorizontal, Users, Heart } from 'lucide-react';
 import { TableType } from '@/app/types';
 
 export const TABLE_TYPES: Record<string, TableType> = {
@@ -24,7 +24,7 @@ export const TABLE_TYPES: Record<string, TableType> = {
   },
   kpi: {
     id: 'kpi',
-    label: 'KPI Achievements',
+    label: 'Channel Overview',
     icon: CheckCircle2,
     description: 'Cross-channel performance against goals.',
     rowType: 'channels',
@@ -65,6 +65,33 @@ export const TABLE_TYPES: Record<string, TableType> = {
       { id: 'comments', label: 'Comments', format: 'number' },
       { id: 'shares', label: 'Shares', format: 'number' },
       { id: 'saves', label: 'Saves', format: 'number' },
+    ],
+  },
+  brand_vs_competitor: {
+    id: 'brand_vs_competitor',
+    label: 'Brand vs Competitor',
+    icon: Users,
+    description: 'Compare brand performance against competitors.',
+    rowType: 'competitors',
+    columns: [
+      { id: 'followers_growth', label: 'Followers Growth', format: 'compact' },
+      { id: 'followers_growth_pct', label: 'Followers Growth %', format: 'percent' },
+      { id: 'post_count', label: 'Post Count', format: 'number' },
+      { id: 'engagement', label: 'Engagement', format: 'compact' },
+      { id: 'er_followers', label: 'ER Followers (%)', format: 'percent' },
+      { id: 'post_reach', label: 'Post Reach', format: 'compact' },
+      { id: 'profile_reach', label: 'Profile Reach', format: 'compact' },
+    ],
+  },
+  sentiments: {
+    id: 'sentiments',
+    label: 'Sentiments',
+    icon: Heart,
+    description: 'Sentiment analysis breakdown.',
+    rowType: 'sentiments',
+    columns: [
+      { id: 'number_of_posts', label: 'Number of Posts', format: 'number' },
+      { id: 'percentage', label: 'Percentage (%)', format: 'percent' },
     ],
   },
   custom: {

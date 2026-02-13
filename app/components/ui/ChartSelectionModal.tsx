@@ -14,11 +14,20 @@ import {
   Calendar,
   Clock,
   Layers,
+  Cloud,
 } from 'lucide-react';
 import { ChartSelectionModalProps, ChartSettings } from '@/app/types';
 
-type ChartCategory = 'line' | 'bar' | null;
-type LineChartDimension = 'months' | 'last3months' | 'days' | 'sentiments';
+type ChartCategory = 'line' | 'bar' | 'wordcloud' | null;
+type WordCloudSentiment = 'all' | 'positive' | 'negative' | 'neutral';
+
+const WORDCLOUD_SENTIMENTS = [
+  { id: 'all', label: 'All', desc: 'All sentiments combined' },
+  { id: 'positive', label: 'Positive', desc: 'Positive sentiment words' },
+  { id: 'negative', label: 'Negative', desc: 'Negative sentiment words' },
+  { id: 'neutral', label: 'Neutral', desc: 'Neutral sentiment words' },
+];
+type LineChartDimension = 'daymonth' | 'last3months' | 'days';
 type BarChartCategory =
   | 'daily_performance'
   | 'last3months_performance'
@@ -36,10 +45,9 @@ interface ChartConfig {
 
 // Line chart dimension options
 const LINE_DIMENSIONS = [
-  { id: 'months', label: 'Monthly', icon: Calendar, desc: 'Month by month trends' },
+  { id: 'daymonth', label: 'Day Month', icon: Calendar, desc: 'Daily trends (1 Jan, 2 Jan, etc.)' },
   { id: 'last3months', label: 'Last 3 Months', icon: Clock, desc: 'Recent 3-month comparison' },
-  { id: 'days', label: 'Daily', icon: Activity, desc: 'Day by day analysis' },
-  { id: 'sentiments', label: 'Sentiments', icon: Heart, desc: 'Sentiment over time' },
+  { id: 'days', label: 'Daily', icon: Activity, desc: 'Day of week analysis (Sun, Mon, etc.)' },
 ];
 
 // Line chart metrics
@@ -52,6 +60,7 @@ const LINE_METRICS = [
   { id: 'likes', label: 'Likes', icon: Heart },
   { id: 'comments', label: 'Comments', icon: MessageCircle },
   { id: 'shares', label: 'Shares', icon: Share2 },
+  { id: 'sentiments', label: 'Sentiments (Neg, Neu, Pos)', icon: Activity },
 ];
 
 // Bar chart categories
@@ -112,6 +121,7 @@ export const ChartSelectionModal: React.FC<ChartSelectionModalProps> = ({
   onClose,
   onSelect,
   config,
+  allowWordCloud = false,
 }) => {
   if (!isOpen) return null;
 
@@ -163,8 +173,17 @@ export const ChartSelectionModal: React.FC<ChartSelectionModalProps> = ({
   const toggleMetric = (metricId: string, isLine: boolean) => {
     if (isLine) {
       setSelectedLineMetrics((prev) => {
+        // If already selected, deselect
         if (prev.includes(metricId)) {
           return prev.filter((m) => m !== metricId);
+        }
+        // Sentiments is exclusive - selecting it clears others
+        if (metricId === 'sentiments') {
+          return ['sentiments'];
+        }
+        // If sentiments is currently selected, replace with new metric
+        if (prev.includes('sentiments')) {
+          return [metricId];
         }
         // Prevent adding more than MAX_LINE_METRICS
         if (prev.length >= MAX_LINE_METRICS) {
@@ -232,12 +251,13 @@ export const ChartSelectionModal: React.FC<ChartSelectionModalProps> = ({
                 {step === 1 && 'Select Chart Type'}
                 {step === 2 && chartCategory === 'line' && 'Select Dimension'}
                 {step === 2 && chartCategory === 'bar' && 'Select Orientation'}
+                {step === 2 && chartCategory === 'wordcloud' && 'Select Sentiment'}
                 {step === 3 && chartCategory === 'line' && 'Select Metrics'}
                 {step === 3 && chartCategory === 'bar' && 'Select Category'}
                 {step === 4 && 'Select Metrics'}
               </h3>
               <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                Step {step} of {chartCategory === 'bar' ? 4 : 3}
+                Step {step} of {chartCategory === 'bar' ? 4 : chartCategory === 'wordcloud' ? 2 : 3}
               </p>
             </div>
           </div>
@@ -248,7 +268,7 @@ export const ChartSelectionModal: React.FC<ChartSelectionModalProps> = ({
 
         {/* Step 1: Select Chart Type */}
         {step === 1 && (
-          <div className="grid grid-cols-2 gap-4">
+          <div className={`grid ${allowWordCloud ? 'grid-cols-3' : 'grid-cols-2'} gap-4`}>
             <button
               onClick={() => {
                 setChartCategory('line');
@@ -275,6 +295,47 @@ export const ChartSelectionModal: React.FC<ChartSelectionModalProps> = ({
                 Compare values
               </span>
             </button>
+            {allowWordCloud && (
+              <button
+                onClick={() => {
+                  setChartCategory('wordcloud');
+                  setStep(2);
+                }}
+                className={baseButtonClass}
+              >
+                <Cloud size={32} className="opacity-70" />
+                <span className="text-sm font-bold">Word Cloud</span>
+                <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Keyword visualization
+                </span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Step 2: Word Cloud - Select Sentiment */}
+        {step === 2 && chartCategory === 'wordcloud' && (
+          <div className="grid grid-cols-2 gap-3">
+            {WORDCLOUD_SENTIMENTS.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => {
+                  onSelect('wordcloud', { sentiment: s.id } as any);
+                  handleClose();
+                }}
+                className={`${baseButtonClass} items-start text-left`}
+              >
+                <div className="flex items-center gap-2 w-full">
+                  <Heart size={18} className="opacity-60" />
+                  <span className="text-sm font-bold">{s.label}</span>
+                </div>
+                <span
+                  className={`text-[10px] w-full ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
+                >
+                  {s.desc}
+                </span>
+              </button>
+            ))}
           </div>
         )}
 
@@ -375,7 +436,12 @@ export const ChartSelectionModal: React.FC<ChartSelectionModalProps> = ({
               {LINE_METRICS.map((metric) => {
                 const IconComp = metric.icon;
                 const isSelected = selectedLineMetrics.includes(metric.id);
-                const isDisabled = !isSelected && selectedLineMetrics.length >= MAX_LINE_METRICS;
+                const isSentimentsSelected = selectedLineMetrics.includes('sentiments');
+                const isDisabled = !isSelected && (
+                  selectedLineMetrics.length >= MAX_LINE_METRICS ||
+                  (isSentimentsSelected && metric.id !== 'sentiments') ||
+                  (selectedLineMetrics.length > 0 && !isSentimentsSelected && metric.id === 'sentiments')
+                );
                 return (
                   <button
                     key={metric.id}

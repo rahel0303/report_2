@@ -1070,6 +1070,54 @@ export function createLayoutContent(pptx: PptxGenJS, config: ReportConfig, title
   });
 }
 
+// Create layout custom slide
+export function createLayoutCustom(pptx: PptxGenJS, config: ReportConfig, title: string) {
+  const slide = pptx.addSlide();
+  slide.background = { color: 'FFFFFF' };
+
+  // Header
+  slide.addShape(pptx.ShapeType.rect, {
+    x: 0,
+    y: 0,
+    w: 10,
+    h: 0.7,
+    fill: { color: 'F9FAFB' },
+    line: { type: 'none' },
+  });
+
+  slide.addText(title, {
+    x: 0.4,
+    y: 0.2,
+    w: 9,
+    h: 0.3,
+    fontSize: 22,
+    bold: true,
+    color: '1F2937',
+    valign: 'middle',
+  });
+
+  // Grid placeholder
+  slide.addShape(pptx.ShapeType.rect, {
+    x: 0.4,
+    y: 1,
+    w: 9.2,
+    h: 4.5,
+    fill: { color: 'F9FAFB' },
+    line: { color: 'E5E7EB', width: 1 },
+  });
+
+  slide.addText('Custom Grid Layout', {
+    x: 0.4,
+    y: 2.8,
+    w: 9.2,
+    h: 0.4,
+    fontSize: 16,
+    color: '6B7280',
+    align: 'center',
+    valign: 'middle',
+  });
+}
+
 export function exportToPPTX(slides: SlideData[], config: ReportConfig) {
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_16x9';
@@ -1091,6 +1139,10 @@ export function exportToPPTX(slides: SlideData[], config: ReportConfig) {
       createLayoutKPI(pptx, config, slideData.title);
     } else if (slideData.type === 'layout_content') {
       createLayoutContent(pptx, config, slideData.title);
+    } else if (slideData.type === 'layout_overview') {
+      createLayoutContent(pptx, config, slideData.title);
+    } else if (slideData.type === 'layout_custom') {
+      createLayoutCustom(pptx, config, slideData.title);
     } else {
       // Generic placeholder for unknown types
       const slide = pptx.addSlide();

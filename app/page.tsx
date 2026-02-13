@@ -42,8 +42,9 @@ import {
   ExitModal,
   SlideTypeSelectionModal,
   ChannelSelectionModal,
+  GridSizeModal,
 } from './components/report/modals';
-import type { SocialChannel } from './components/report/modals';
+import type { SocialChannel, GridSize } from './components/report/modals';
 
 // Import utilities
 import { LAYOUT_TEMPLATES, getPeriodOptions } from './constants/templates';
@@ -77,6 +78,7 @@ const ReportSetupInterface: React.FC = () => {
   const [isSlideTypeModalOpen, setIsSlideTypeModalOpen] = useState(false);
   const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState<SocialChannel | null>(null);
+  const [isGridSizeModalOpen, setIsGridSizeModalOpen] = useState(false);
   const [isCompetitorDropdownOpen, setIsCompetitorDropdownOpen] = useState(false);
   const [isSaveDropdownOpen, setIsSaveDropdownOpen] = useState(false);
   const [isLoadDropdownOpen, setIsLoadDropdownOpen] = useState(false);
@@ -518,6 +520,13 @@ const ReportSetupInterface: React.FC = () => {
   };
 
   const handleTemplateSelect = (templateType: string) => {
+    // For custom template, show grid size modal first
+    if (templateType === 'layout_custom') {
+      setIsTemplateModalOpen(false);
+      setIsGridSizeModalOpen(true);
+      return;
+    }
+
     const templateMap: Record<string, string> = {
       layout_dashboard: 'Standard Dashboard',
       layout_comparison: 'Comparison Analysis',
@@ -552,6 +561,37 @@ const ReportSetupInterface: React.FC = () => {
     );
     setIsTemplateModalOpen(false);
     setSelectedChannel(null); // Reset after use
+  };
+
+  const handleGridSizeSelect = (gridSize: GridSize) => {
+    const channelNames: Record<SocialChannel, string> = {
+      instagram: 'Instagram',
+      facebook: 'Facebook',
+      twitter: 'Twitter/X',
+      tiktok: 'TikTok',
+      youtube: 'YouTube',
+    };
+
+    setSlides(
+      slides.map((s) => {
+        if (s.id === activeSlideId) {
+          const isGenericTitle = s.title.startsWith('New Slide');
+          const channelSuffix = selectedChannel ? ` - ${channelNames[selectedChannel]}` : '';
+          return {
+            ...s,
+            type: 'layout_custom' as any,
+            title: isGenericTitle ? `Custom Template${channelSuffix}` : s.title,
+            content: {
+              channel: selectedChannel,
+              gridSize,
+            },
+          };
+        }
+        return s;
+      }),
+    );
+    setIsGridSizeModalOpen(false);
+    setSelectedChannel(null);
   };
 
   const handleSectionHeadingSelect = () => {
@@ -660,6 +700,16 @@ const ReportSetupInterface: React.FC = () => {
         onClose={() => setIsTemplateModalOpen(false)}
         onSelect={handleTemplateSelect}
         templates={templates}
+      />
+
+      {/* GRID SIZE MODAL (for Custom Template) */}
+      <GridSizeModal
+        isOpen={isGridSizeModalOpen}
+        onClose={() => {
+          setIsGridSizeModalOpen(false);
+          setSelectedChannel(null);
+        }}
+        onSelect={handleGridSizeSelect}
       />
 
       <main className="max-w-7xl mx-auto px-6 py-8">

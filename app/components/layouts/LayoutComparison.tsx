@@ -52,6 +52,7 @@ export const LayoutComparison: React.FC<LayoutProps> = ({
             savedState={data.chart_a}
             onSave={(val) => onUpdate('chart_a', val)}
             isExport={isExport}
+            allowWordCloud
           />
         </div>
         <div
@@ -64,6 +65,7 @@ export const LayoutComparison: React.FC<LayoutProps> = ({
             savedState={data.chart_b}
             onSave={(val) => onUpdate('chart_b', val)}
             isExport={isExport}
+            allowWordCloud
           />
         </div>
       </div>

@@ -38,39 +38,63 @@ const METRIC_LABELS: Record<string, string> = {
   avg_reach: 'Avg Reach',
   avg_er_reach: 'Avg ER Reach',
   followers_growth: 'Followers Growth',
+  sentiments: 'Sentiments',
+  negative: 'Negative',
+  neutral: 'Neutral',
+  positive: 'Positive',
 };
 
 // Generate dummy data based on dimension
 const generateLineChartData = (dimension: string, metrics: string[]) => {
+  const isSentiments = metrics.includes('sentiments');
+
   const getLabels = () => {
     switch (dimension) {
       case 'days':
-        return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      case 'last3months':
+        return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      case 'last3months': {
         const now = new Date();
+        const m1 = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+        const m2 = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const m3 = new Date(now.getFullYear(), now.getMonth(), 1);
         return [
-          new Date(now.setMonth(now.getMonth() - 2)).toLocaleString('en', { month: 'short' }),
-          new Date(now.setMonth(now.getMonth() + 1)).toLocaleString('en', { month: 'short' }),
-          new Date(now.setMonth(now.getMonth() + 1)).toLocaleString('en', { month: 'short' }),
+          m1.toLocaleString('en', { month: 'short' }),
+          m2.toLocaleString('en', { month: 'short' }),
+          m3.toLocaleString('en', { month: 'short' }),
         ];
-      case 'sentiments':
-        return ['Very Negative', 'Negative', 'Neutral', 'Positive', 'Very Positive'];
-      case 'months':
-      default:
-        return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+      }
+      case 'daymonth':
+      default: {
+        const now = new Date();
+        const month = now.toLocaleString('en', { month: 'short' });
+        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        return Array.from({ length: daysInMonth }, (_, i) => `${i + 1} ${month}`);
+      }
     }
   };
 
   const labels = getLabels();
   return labels.map((label, idx) => {
     const dataPoint: Record<string, any> = { name: label };
-    metrics.forEach((metric, mIdx) => {
-      // Generate realistic-looking random data
-      const baseValue = 1000 + mIdx * 500;
-      const variation = Math.floor(Math.random() * 2000) - 500;
-      const trend = idx * 100; // Slight upward trend
-      dataPoint[metric] = Math.max(0, baseValue + variation + trend);
-    });
+
+    if (isSentiments) {
+      // Sentiments generates 3 lines: negative, neutral, positive
+      const total = 100;
+      const negative = Math.max(5, Math.floor(Math.random() * 25) + 10 - idx * 0.3);
+      const positive = Math.max(10, Math.floor(Math.random() * 30) + 30 + idx * 0.5);
+      const neutral = total - negative - positive;
+      dataPoint.negative = Math.round(negative);
+      dataPoint.neutral = Math.round(neutral);
+      dataPoint.positive = Math.round(positive);
+    } else {
+      metrics.forEach((metric, mIdx) => {
+        const baseValue = 1000 + mIdx * 500;
+        const variation = Math.floor(Math.random() * 2000) - 500;
+        const trend = idx * 100;
+        dataPoint[metric] = Math.max(0, baseValue + variation + trend);
+      });
+    }
+
     return dataPoint;
   });
 };
@@ -116,6 +140,7 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
   savedState,
   onSave,
   isExport = false,
+  allowWordCloud = false,
 }) => {
   const [chartType, setChartType] = useState<ChartType | null>(savedState?.type || null);
   const [settings, setSettings] = useState<any>(savedState?.settings || {});
@@ -171,7 +196,7 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
 
   // Generate data based on chart configuration
   const lineData = useMemo(() => {
-    const dimension = settings?.dimension || 'months';
+    const dimension = settings?.dimension || 'daymonth';
     const metrics = settings?.metrics || ['followers', 'engagements'];
     return generateLineChartData(dimension, metrics);
   }, [settings?.dimension, settings?.metrics]);
@@ -201,6 +226,70 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
       image: images[i % images.length],
     }));
   }, [settings?.count]);
+
+  const wordCloudData = useMemo(() => {
+    const sentiment = settings?.sentiment || 'all';
+
+    const allWords = [
+      // Positive words
+      { text: 'love', count: 245, sentiment: 'positive' },
+      { text: 'great', count: 189, sentiment: 'positive' },
+      { text: 'amazing', count: 156, sentiment: 'positive' },
+      { text: 'recommend', count: 134, sentiment: 'positive' },
+      { text: 'best', count: 178, sentiment: 'positive' },
+      { text: 'excellent', count: 112, sentiment: 'positive' },
+      { text: 'beautiful', count: 98, sentiment: 'positive' },
+      { text: 'happy', count: 145, sentiment: 'positive' },
+      { text: 'favorite', count: 121, sentiment: 'positive' },
+      { text: 'premium', count: 87, sentiment: 'positive' },
+      // Negative words
+      { text: 'slow', count: 89, sentiment: 'negative' },
+      { text: 'expensive', count: 134, sentiment: 'negative' },
+      { text: 'broken', count: 67, sentiment: 'negative' },
+      { text: 'disappointed', count: 78, sentiment: 'negative' },
+      { text: 'poor', count: 56, sentiment: 'negative' },
+      { text: 'worst', count: 45, sentiment: 'negative' },
+      { text: 'bad', count: 98, sentiment: 'negative' },
+      { text: 'terrible', count: 34, sentiment: 'negative' },
+      // Neutral words
+      { text: 'product', count: 210, sentiment: 'neutral' },
+      { text: 'price', count: 167, sentiment: 'neutral' },
+      { text: 'service', count: 143, sentiment: 'neutral' },
+      { text: 'delivery', count: 112, sentiment: 'neutral' },
+      { text: 'brand', count: 198, sentiment: 'neutral' },
+      { text: 'quality', count: 156, sentiment: 'neutral' },
+      { text: 'design', count: 89, sentiment: 'neutral' },
+      { text: 'content', count: 123, sentiment: 'neutral' },
+      { text: 'experience', count: 134, sentiment: 'neutral' },
+    ];
+
+    const filtered = sentiment === 'all' ? allWords : allWords.filter(w => w.sentiment === sentiment);
+
+    const sentimentColors: Record<string, string[]> = {
+      positive: ['#10b981', '#059669', '#34d399', '#6ee7b7'],
+      negative: ['#ef4444', '#dc2626', '#f87171', '#fca5a5'],
+      neutral: ['#3b82f6', '#6366f1', '#8b5cf6', '#06b6d4'],
+    };
+    const allColors = ['#10b981', '#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'];
+
+    return filtered.map((w, i) => {
+      const colors = sentiment === 'all' ? allColors : (sentimentColors[w.sentiment] || allColors);
+      return {
+        ...w,
+        color: colors[i % colors.length],
+        rotation: [0, 0, 0, -10, 10, 0, 0, -6, 6, 0][i % 10],
+      };
+    });
+  }, [settings?.sentiment]);
+
+  const wordCloudShuffled = useMemo(() => {
+    const arr = [...wordCloudData];
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = (i * 7 + 3) % (i + 1);
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }, [wordCloudData]);
 
   const renderContent = () => {
     if (!chartType) {
@@ -266,6 +355,53 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
       </div>
     );
 
+    if (chartType === 'wordcloud') {
+      const maxCount = Math.max(...wordCloudData.map(w => w.count));
+      const minCount = Math.min(...wordCloudData.map(w => w.count));
+      const minFont = isExport ? 14 : 10;
+      const maxFont = isExport ? 56 : 38;
+      const sentimentLabel = settings?.sentiment === 'positive' ? 'Positive'
+        : settings?.sentiment === 'negative' ? 'Negative'
+        : settings?.sentiment === 'neutral' ? 'Neutral' : 'All';
+
+      // Which indices are vertical (writing-mode)
+      const verticalIndices = new Set([2, 5, 9, 14, 18, 22]);
+
+      return (
+        <ChartWrapper>
+          <div className="w-full h-full flex flex-col overflow-hidden">
+            <div className={`px-2 py-1 text-[9px] font-medium shrink-0 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              Sentiment: <span className={`font-bold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{sentimentLabel}</span>
+            </div>
+            <div className="flex-1 flex flex-wrap items-center justify-center content-center gap-x-1 gap-y-0 overflow-hidden px-3 py-1">
+              {wordCloudShuffled.map((word, i) => {
+                const t = (word.count - minCount) / (maxCount - minCount || 1);
+                const size = minFont + t * (maxFont - minFont);
+                const isVertical = verticalIndices.has(i);
+                return (
+                  <span
+                    key={i}
+                    className="inline-block cursor-default select-none hover:opacity-80 transition-opacity"
+                    style={{
+                      fontSize: `${size}px`,
+                      fontWeight: t > 0.6 ? 800 : t > 0.35 ? 600 : 400,
+                      color: word.color,
+                      lineHeight: 1.1,
+                      padding: `${isExport ? 2 : 1}px ${isExport ? 4 : 2}px`,
+                      ...(isVertical ? { writingMode: 'vertical-rl' as const } : {}),
+                    }}
+                    title={`${word.text}: ${word.count}`}
+                  >
+                    {word.text}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        </ChartWrapper>
+      );
+    }
+
     if (chartType === 'posts') {
       return (
         <ChartWrapper>
@@ -322,8 +458,13 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
     }
 
     // Get metrics for rendering
-    const lineMetrics = settings?.metrics || ['followers', 'engagements'];
+    const rawLineMetrics = settings?.metrics || ['followers', 'engagements'];
+    const isSentiments = rawLineMetrics.includes('sentiments');
+    const lineMetrics = isSentiments ? ['negative', 'neutral', 'positive'] : rawLineMetrics;
     const barMetrics = settings?.barMetrics || ['engagement', 'followers'];
+
+    // Colors for sentiments
+    const sentimentColors = ['#ef4444', '#f59e0b', '#10b981']; // red, amber, green
 
     return (
       <ChartWrapper>
@@ -341,6 +482,7 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
                   tick={{ fontSize: fontSize.axisLabel, fill: isDark ? '#94a3b8' : '#64748b' }}
                   axisLine={false}
                   tickLine={false}
+                  interval={lineData.length > 10 ? 1 : 0}
                 />
                 <YAxis
                   tick={{ fontSize: fontSize.axisLabel, fill: isDark ? '#94a3b8' : '#64748b' }}
@@ -374,9 +516,9 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
                     key={metric}
                     type="monotone"
                     dataKey={metric}
-                    stroke={metricColors[idx % metricColors.length]}
+                    stroke={isSentiments ? sentimentColors[idx % sentimentColors.length] : metricColors[idx % metricColors.length]}
                     strokeWidth={2}
-                    dot={{ r: 3 }}
+                    dot={{ r: lineData.length > 10 ? 2 : 3 }}
                     name={metric}
                   />
                 ))}
@@ -552,6 +694,7 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
         onClose={() => setIsModalOpen(false)}
         onSelect={handleSelect}
         config={config}
+        allowWordCloud={allowWordCloud}
       />
     </>
   );

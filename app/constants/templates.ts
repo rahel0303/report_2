@@ -26,6 +26,18 @@ export const LAYOUT_TEMPLATES: Template[] = [
     icon: Layout,
     desc: 'Media / Screenshot & Analysis',
   },
+  {
+    id: 'layout_overview',
+    name: 'Overview Slide',
+    icon: Layout,
+    desc: 'Full Visualization & Notes',
+  },
+  {
+    id: 'layout_custom',
+    name: 'Custom Template',
+    icon: Layout,
+    desc: 'Configurable Grid (2x2, 3x3)',
+  },
 ];
 
 export const getPeriodOptions = (type: 'Monthly' | 'Quarterly'): string[] => {

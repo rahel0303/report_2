@@ -7,4 +7,6 @@ export { ExitModal } from './ExitModal';
 export { SlideTypeSelectionModal } from './SlideTypeSelectionModal';
 export { ChannelSelectionModal } from './ChannelSelectionModal';
 export type { SocialChannel } from './ChannelSelectionModal';
+export { GridSizeModal } from './GridSizeModal';
+export type { GridSize } from './GridSizeModal';
 export { getChannelDisplayName, getChannelIcon, getChannelIconComponent, getChannelMetricName, UNIFIED_METRICS } from './ChannelSelectionModal';

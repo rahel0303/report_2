@@ -100,6 +100,19 @@ export const SmartTableBlock: React.FC<SmartTableBlockProps> = ({
         { id: 'reel', label: 'Reels', ...generateRowValues() },
         { id: 'car', label: 'Carousel', ...generateRowValues() },
       ];
+    } else if (typeDef.rowType === 'competitors') {
+      rows = [
+        { id: 'brand', label: 'Brand', ...generateRowValues() },
+        { id: 'comp_a', label: 'Competitor A', ...generateRowValues() },
+        { id: 'comp_b', label: 'Competitor B', ...generateRowValues() },
+        { id: 'comp_c', label: 'Competitor C', ...generateRowValues() },
+      ];
+    } else if (typeDef.rowType === 'sentiments') {
+      rows = [
+        { id: 'positive', label: 'Positive', ...generateRowValues() },
+        { id: 'neutral', label: 'Neutral', ...generateRowValues() },
+        { id: 'negative', label: 'Negative', ...generateRowValues() },
+      ];
     } else {
       rows = [
         { id: '1', label: 'Item 1', ...generateRowValues() },
@@ -148,7 +161,11 @@ export const SmartTableBlock: React.FC<SmartTableBlockProps> = ({
                     ? 'Period'
                     : typeDef.rowType === 'channels'
                       ? 'Channel'
-                      : 'Category'}
+                      : typeDef.rowType === 'competitors'
+                        ? 'Brand'
+                        : typeDef.rowType === 'sentiments'
+                          ? 'Sentiment'
+                          : 'Category'}
                 </th>
                 {visibleCols.map((col) => (
                   <th

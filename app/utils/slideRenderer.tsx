@@ -8,6 +8,8 @@ import {
   LayoutComparison,
   LayoutKPI,
   LayoutContent,
+  LayoutOverview,
+  LayoutCustom,
 } from '@/app/components/layouts';
 
 export const renderSlide = (
@@ -92,6 +94,32 @@ export const renderSlide = (
           totalPages={totalPages}
           isExport={isExport}
           key={`layout-content-${config.clientName}-${config.period}`}
+        />
+      );
+
+    case 'layout_overview':
+      return (
+        <LayoutOverview
+          config={config}
+          data={slide.content}
+          onUpdate={onUpdate}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          isExport={isExport}
+          key={`layout-overview-${config.clientName}-${config.period}`}
+        />
+      );
+
+    case 'layout_custom':
+      return (
+        <LayoutCustom
+          config={config}
+          data={slide.content}
+          onUpdate={onUpdate}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          isExport={isExport}
+          key={`layout-custom-${config.clientName}-${config.period}`}
         />
       );
 

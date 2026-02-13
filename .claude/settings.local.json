@@ -6,7 +6,10 @@
       "Bash(npm run dev:*)",
       "Bash(npm run build:*)",
       "Bash(PGPASSWORD=postgres psql:*)",
-      "Bash(where:*)"
+      "Bash(where:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx next build:*)",
+      "Bash(npm ls:*)"
     ]
   }
 }

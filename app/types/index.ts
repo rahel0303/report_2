@@ -48,6 +48,8 @@ export type SlideType =
   | 'layout_comparison'
   | 'layout_kpi'
   | 'layout_content'
+  | 'layout_overview'
+  | 'layout_custom'
   | 'section_heading';
 
 export interface Slide {
@@ -69,7 +71,7 @@ export interface TableType {
   label: string;
   icon: LucideIcon;
   description: string;
-  rowType: 'comparison' | 'channels' | 'types' | 'generic';
+  rowType: 'comparison' | 'channels' | 'types' | 'competitors' | 'sentiments' | 'generic';
   columns: TableColumn[];
 }
 
@@ -95,7 +97,7 @@ export interface MetricData {
 }
 
 // Chart Types
-export type ChartType = 'line' | 'bar' | 'column' | 'pie' | 'posts';
+export type ChartType = 'line' | 'bar' | 'column' | 'pie' | 'posts' | 'wordcloud';
 
 export interface ChartSettings {
   count?: number;
@@ -211,6 +213,7 @@ export interface ChartSelectionModalProps {
   onClose: () => void;
   onSelect: (type: ChartType | string, settings?: ChartSettings) => void;
   config: ReportConfig;
+  allowWordCloud?: boolean;
 }
 
 export interface InsightMethodSelectionModalProps {
@@ -254,6 +257,7 @@ export interface SmartChartBlockProps {
   savedState?: ChartData | null;
   onSave?: (data: ChartData) => void;
   isExport?: boolean;
+  allowWordCloud?: boolean;
 }
 
 export interface SmartInsightBlockProps {

@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { LayoutProps } from '@/app/types';
 import { EditableSlideTitle, SlideFooter, ChannelBadge } from '@/app/components/ui';
 import { MetricScorecard, SmartChartBlock } from '@/app/components/charts';
 import { SmartInsightBlock } from '@/app/components/insights';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Edit3, X, LayoutGrid } from 'lucide-react';
+
+const METRIC_COUNT_OPTIONS = [3, 4, 5, 6];
 
 export const LayoutKPI: React.FC<LayoutProps> = ({
   config,
@@ -15,15 +17,18 @@ export const LayoutKPI: React.FC<LayoutProps> = ({
   totalPages = 1,
   isExport = false,
 }) => {
-  // Use logo colors if available, otherwise fallback to theme
+  const [isMetricModalOpen, setIsMetricModalOpen] = useState(false);
+
   const logoColors = config.coverDesign?.colors;
-  const isDark = false; // Always light mode for cleaner look
+  const isDark = false;
   const styles = {
     bg: '#ffffff',
     cardBg: '#ffffff',
     border: 'border-slate-200',
     accent: logoColors?.primary || config.theme.brandColor,
   };
+
+  const metricCount: number = data.metricCount || 4;
 
   return (
     <div
@@ -34,25 +39,73 @@ export const LayoutKPI: React.FC<LayoutProps> = ({
         className={`h-[10%] shrink-0 border-b flex items-center justify-between pb-4 ${styles.border}`}
       >
         <EditableSlideTitle title={title} onChange={onTitleChange} isDark={isDark} />
-        {data.channel && (
-          <div className="ml-4">
+        <div className="flex items-center gap-3">
+          {data.channel && (
             <ChannelBadge channel={data.channel} isDark={isDark} size="lg" />
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      <div className="flex gap-4 h-[22%] min-h-[120px]">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="flex-1">
-            <MetricScorecard
-              config={config}
-              savedState={data[`metric_${i}`]}
-              onSave={(val) => onUpdate(`metric_${i}`, val)}
-              isExport={isExport}
-            />
-          </div>
-        ))}
+      <div className="relative">
+        {!isExport && (
+          <button
+            onClick={() => setIsMetricModalOpen(true)}
+            className="absolute -top-1 -right-1 z-10 p-1 rounded-md bg-white border border-slate-200 text-slate-400 hover:text-blue-500 hover:border-blue-300 shadow-sm transition-colors"
+            title="Change number of metrics"
+          >
+            <Edit3 size={12} />
+          </button>
+        )}
+        <div className="flex gap-4 h-[120px]">
+          {Array.from({ length: metricCount }, (_, i) => i + 1).map((i) => (
+            <div key={i} className="flex-1">
+              <MetricScorecard
+                config={config}
+                savedState={data[`metric_${i}`]}
+                onSave={(val) => onUpdate(`metric_${i}`, val)}
+                isExport={isExport}
+              />
+            </div>
+          ))}
+        </div>
       </div>
+
+      {/* Metric Count Modal */}
+      {isMetricModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
+          <div className="w-full max-w-sm p-6 rounded-2xl shadow-2xl bg-white">
+            <div className="flex justify-between items-center mb-5">
+              <div>
+                <h3 className="font-bold text-lg text-slate-900">Number of Metrics</h3>
+                <p className="text-xs text-slate-500">Select how many metric blocks to show</p>
+              </div>
+              <button onClick={() => setIsMetricModalOpen(false)}>
+                <X size={20} className="text-slate-400" />
+              </button>
+            </div>
+            <div className="grid grid-cols-4 gap-3">
+              {METRIC_COUNT_OPTIONS.map((n) => (
+                <button
+                  key={n}
+                  onClick={() => {
+                    onUpdate('metricCount', n);
+                    setIsMetricModalOpen(false);
+                  }}
+                  className={`p-4 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all hover:scale-[1.02] ${
+                    metricCount === n
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <LayoutGrid size={24} className="opacity-70" />
+                  <span className="text-lg font-bold">{n}</span>
+                  <span className="text-[10px] text-slate-400">blocks</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 flex gap-4 min-h-0">
         <div
