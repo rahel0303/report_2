@@ -49,6 +49,8 @@ export const renderSlide = (
       return (
         <LayoutDashboard
           config={config}
+          title={slide.title}
+          onTitleChange={onUpdate ? (t: string) => onUpdate('_title', t) : undefined}
           data={slide.content}
           onUpdate={onUpdate}
           currentPage={currentPage}
@@ -62,6 +64,8 @@ export const renderSlide = (
       return (
         <LayoutComparison
           config={config}
+          title={slide.title}
+          onTitleChange={onUpdate ? (t: string) => onUpdate('_title', t) : undefined}
           data={slide.content}
           onUpdate={onUpdate}
           currentPage={currentPage}
@@ -75,6 +79,8 @@ export const renderSlide = (
       return (
         <LayoutKPI
           config={config}
+          title={slide.title}
+          onTitleChange={onUpdate ? (t: string) => onUpdate('_title', t) : undefined}
           data={slide.content}
           onUpdate={onUpdate}
           currentPage={currentPage}
@@ -88,6 +94,8 @@ export const renderSlide = (
       return (
         <LayoutContent
           config={config}
+          title={slide.title}
+          onTitleChange={onUpdate ? (t: string) => onUpdate('_title', t) : undefined}
           data={slide.content}
           onUpdate={onUpdate}
           currentPage={currentPage}
@@ -101,6 +109,8 @@ export const renderSlide = (
       return (
         <LayoutOverview
           config={config}
+          title={slide.title}
+          onTitleChange={onUpdate ? (t: string) => onUpdate('_title', t) : undefined}
           data={slide.content}
           onUpdate={onUpdate}
           currentPage={currentPage}
@@ -114,6 +124,8 @@ export const renderSlide = (
       return (
         <LayoutCustom
           config={config}
+          title={slide.title}
+          onTitleChange={onUpdate ? (t: string) => onUpdate('_title', t) : undefined}
           data={slide.content}
           onUpdate={onUpdate}
           currentPage={currentPage}

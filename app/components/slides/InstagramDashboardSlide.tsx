@@ -306,7 +306,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
     trend: 'up' | 'down';
     trendValue: string;
   }) => (
-    <div className="flex flex-col justify-center">
+    <div data-dashboard-text="metric" className="flex flex-col justify-center">
       <span
         className={`${fontSize.metricLabel} font-bold uppercase tracking-wider ${styles.textMuted}`}
         style={{ fontFamily: config.font.name }}
@@ -359,11 +359,13 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
           </div>
           <div>
             <h1
+              data-dashboard-text="title"
               className={`${fontSize.title} font-bold tracking-tight leading-none ${styles.textMain}`}
             >
               Instagram Performance
             </h1>
             <p
+              data-dashboard-text="period"
               className={`${fontSize.metricChange} font-medium flex items-center gap-1 mt-1 uppercase tracking-wide ${styles.textMuted}`}
             >
               <Calendar size={10} /> {config.period} Report
@@ -395,6 +397,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
       <div className="flex-1 flex flex-col p-4 gap-3 overflow-hidden min-h-0">
         <div className="flex gap-3 h-[55%] min-h-0 w-full">
           <div
+            data-dashboard-chart
             className={`flex-[1.85] rounded-xl border p-3 flex flex-col min-w-0 relative overflow-hidden ${styles.border}`}
             style={{ backgroundColor: styles.cardBg, boxShadow: styles.cardShadow, borderColor: styles.borderColor }}
           >
@@ -512,6 +515,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
           </div>
 
           <div
+            data-dashboard-insight
             className={`flex-1 rounded-md border p-3 shadow-sm flex flex-col overflow-hidden relative ${styles.border}`}
             style={{ backgroundColor: styles.cardBg }}
           >
@@ -580,7 +584,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
               </div>
             )}
 
-            <div className="flex-1 flex flex-col justify-center overflow-hidden">
+            <div data-dashboard-text="takeaways" className="flex-1 flex flex-col justify-center overflow-hidden">
               {isTyping ? (
                 <div className="flex flex-col items-center justify-center h-full gap-2 opacity-70">
                   <Sparkles size={20} className="text-indigo-500 animate-spin" />
@@ -622,6 +626,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
         </div>
 
         <div
+          data-dashboard-table
           className={`h-[45%] rounded-xl border shadow-sm flex flex-col min-h-0 overflow-hidden ${styles.border}`}
           style={{ backgroundColor: styles.cardBg }}
         >

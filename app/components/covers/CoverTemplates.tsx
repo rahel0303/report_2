@@ -55,7 +55,7 @@ export const GeometricTemplate: React.FC<CoverDesignProps> = ({
       </div>
 
       {/* Content */}
-      <div className="relative z-10 flex flex-col items-center justify-center h-full px-12 text-white">
+      <div data-cover-content className="relative z-10 flex flex-col items-center justify-center h-full px-12 text-white">
         {logo && (
           <div className="mb-6 flex justify-center">
             <img src={logo} alt="Logo" className="h-20 object-contain rounded-xl" />
@@ -122,7 +122,7 @@ export const FluidWavesTemplate: React.FC<CoverDesignProps> = ({
       </div>
 
       {/* Content */}
-      <div className="relative z-10 flex flex-col items-center justify-center h-full px-12">
+      <div data-cover-content className="relative z-10 flex flex-col items-center justify-center h-full px-12">
         {logo && (
           <div className="mb-6 flex justify-center">
             <img src={logo} alt="Logo" className="h-20 object-contain rounded-xl" />
@@ -213,7 +213,7 @@ export const AbstractTemplate: React.FC<CoverDesignProps> = ({
       </div>
 
       {/* Content */}
-      <div className="relative z-10 flex flex-col items-center justify-center h-full px-12 text-white">
+      <div data-cover-content className="relative z-10 flex flex-col items-center justify-center h-full px-12 text-white">
         {logo && (
           <div className="mb-6 flex justify-center">
             <img src={logo} alt="Logo" className="h-20 object-contain rounded-xl" />
@@ -265,7 +265,7 @@ export const MinimalGradientTemplate: React.FC<CoverDesignProps> = ({
       <div className="absolute right-0 top-1/2 transform -translate-y-1/2 w-32 h-1 bg-white opacity-30" />
 
       {/* Content */}
-      <div className="relative z-10 flex flex-col items-center justify-center h-full px-12 text-white">
+      <div data-cover-content className="relative z-10 flex flex-col items-center justify-center h-full px-12 text-white">
         {logo && (
           <div className="mb-6 flex justify-center">
             <img src={logo} alt="Logo" className="h-20 object-contain rounded-xl" />
@@ -331,7 +331,7 @@ export const ModernGridTemplate: React.FC<CoverDesignProps> = ({
       />
 
       {/* Content */}
-      <div className="relative z-10 flex flex-col items-start justify-center h-full px-20">
+      <div data-cover-content className="relative z-10 flex flex-col items-start justify-center h-full px-20">
         {logo && (
           <div className="mb-6">
             <img src={logo} alt="Logo" className="h-16 object-contain rounded-xl" />

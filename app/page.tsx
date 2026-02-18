@@ -493,6 +493,10 @@ const ReportSetupInterface: React.FC = () => {
     setSlides((prev) =>
       prev.map((slide) => {
         if (slide.id === slideId) {
+          // Handle title change via special '_title' key
+          if (key === '_title' && typeof value === 'string') {
+            return { ...slide, title: value };
+          }
           const updatedSlide = { ...slide, content: { ...slide.content, [key]: value } };
           // Sync section title to slide title for consistency in review grid
           if (key === 'sectionTitle' && typeof value === 'string') {

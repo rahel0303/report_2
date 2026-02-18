@@ -39,6 +39,7 @@ export const LayoutDashboard: React.FC<LayoutProps> = ({
 
       {/* Header Section */}
       <div
+        data-layout-header
         className="h-[12%] shrink-0 rounded-xl p-4 flex items-center justify-between relative overflow-hidden"
         style={{
           backgroundColor: theme.cardBg,
@@ -62,7 +63,7 @@ export const LayoutDashboard: React.FC<LayoutProps> = ({
           <EditableSlideTitle title={title} onChange={onTitleChange} isDark={isDark} />
         </div>
         {data.channel && (
-          <div className="ml-4">
+          <div className="ml-4" data-channel-badge>
             <ChannelBadge channel={data.channel} isDark={isDark} size="lg" />
           </div>
         )}
@@ -72,6 +73,7 @@ export const LayoutDashboard: React.FC<LayoutProps> = ({
       <div className="flex gap-4 h-[50%] min-h-0 w-full">
         {/* Main Chart Area */}
         <div
+          data-layout-chart
           className="flex-[1.85] rounded-xl p-3 relative overflow-hidden transition-shadow duration-300"
           style={{
             backgroundColor: theme.cardBg,
@@ -79,12 +81,6 @@ export const LayoutDashboard: React.FC<LayoutProps> = ({
             boxShadow: theme.cardShadow,
           }}
         >
-          {/* Top accent line */}
-          <div
-            className="absolute top-0 left-4 right-4 h-[2px] rounded-full"
-            style={{ background: theme.accentLine }}
-          />
-
           <SmartChartBlock
             label="Main Chart Area"
             config={config}
@@ -96,6 +92,7 @@ export const LayoutDashboard: React.FC<LayoutProps> = ({
 
         {/* Insights Panel */}
         <div
+          data-layout-insight
           className="flex-1 rounded-xl p-3 relative overflow-hidden"
           style={{
             backgroundColor: theme.cardBg,
@@ -127,6 +124,7 @@ export const LayoutDashboard: React.FC<LayoutProps> = ({
 
       {/* Table Section */}
       <div
+        data-layout-table
         className="h-[38%] rounded-xl overflow-hidden relative"
         style={{
           backgroundColor: theme.cardBg,
@@ -134,12 +132,6 @@ export const LayoutDashboard: React.FC<LayoutProps> = ({
           boxShadow: theme.cardShadow,
         }}
       >
-        {/* Bottom accent line */}
-        <div
-          className="absolute bottom-0 left-4 right-4 h-[2px] rounded-full"
-          style={{ background: theme.accentLine }}
-        />
-
         <SmartTableBlock
           config={config}
           savedState={data.table_block}
@@ -149,14 +141,16 @@ export const LayoutDashboard: React.FC<LayoutProps> = ({
         />
       </div>
 
-      <SlideFooter
-        clientName={config.clientName}
-        period={config.period}
-        currentPage={currentPage}
-        totalPages={totalPages}
-        logo={config.coverDesign?.logoData}
-        brandColor={theme.colors.primary}
-      />
+      <div data-layout-footer>
+        <SlideFooter
+          clientName={config.clientName}
+          period={config.period}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          logo={config.coverDesign?.logoData}
+          brandColor={theme.colors.primary}
+        />
+      </div>
     </div>
   );
 };

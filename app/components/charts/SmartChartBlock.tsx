@@ -227,6 +227,36 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
     }));
   }, [settings?.count]);
 
+  // Metric keys for chart rendering & export
+  const rawLineMetrics = settings?.metrics || ['followers', 'engagements'];
+  const isSentiments = rawLineMetrics.includes('sentiments');
+  const lineMetrics = isSentiments ? ['negative', 'neutral', 'positive'] : rawLineMetrics;
+  const barMetrics = settings?.barMetrics || ['engagement', 'followers'];
+
+  // Build chart data JSON for PPTX export extraction (must be top-level hook)
+  const chartExportJson = useMemo(() => {
+    if (chartType === 'pie') {
+      return JSON.stringify({
+        type: 'pie',
+        labels: pieData.map((d) => d.name),
+        series: [{ name: 'Value', values: pieData.map((d) => d.value) }],
+      });
+    }
+    const activeData = chartType === 'bar' ? barData : lineData;
+    const activeMetrics = chartType === 'bar' ? barMetrics : lineMetrics;
+    const labels = activeData.map((d: any) => d.name);
+    const series = activeMetrics.map((metric: string) => ({
+      name: METRIC_LABELS[metric] || metric,
+      values: activeData.map((d: any) => d[metric] ?? 0),
+    }));
+    return JSON.stringify({
+      type: chartType,
+      orientation: settings?.barOrientation || 'horizontal',
+      labels,
+      series,
+    });
+  }, [chartType, barData, lineData, barMetrics, lineMetrics, pieData, settings?.barOrientation]);
+
   const wordCloudData = useMemo(() => {
     const sentiment = settings?.sentiment || 'all';
 
@@ -457,18 +487,12 @@ export const SmartChartBlock: React.FC<SmartChartBlockProps> = ({
       );
     }
 
-    // Get metrics for rendering
-    const rawLineMetrics = settings?.metrics || ['followers', 'engagements'];
-    const isSentiments = rawLineMetrics.includes('sentiments');
-    const lineMetrics = isSentiments ? ['negative', 'neutral', 'positive'] : rawLineMetrics;
-    const barMetrics = settings?.barMetrics || ['engagement', 'followers'];
-
     // Colors for sentiments
     const sentimentColors = ['#ef4444', '#f59e0b', '#10b981']; // red, amber, green
 
     return (
       <ChartWrapper>
-        <div className={`w-full h-full ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
+        <div className={`w-full h-full ${isDark ? 'bg-slate-800' : 'bg-white'}`} data-chart-json={chartExportJson}>
           <ResponsiveContainer width="100%" height="100%">
             {chartType === 'line' ? (
               <LineChart data={lineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>

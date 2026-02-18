@@ -115,7 +115,7 @@ export const SectionHeadingSlide: React.FC<SectionHeadingSlideProps> = ({
       </div>
 
       {/* Main Content */}
-      <div className="relative z-10 text-center px-12 max-w-4xl">
+      <div data-cover-content className="relative z-10 text-center px-12 max-w-4xl">
         {/* Top decorative element */}
         <div className="flex items-center justify-center gap-3 mb-8">
           <div
