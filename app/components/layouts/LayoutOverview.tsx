@@ -5,6 +5,7 @@ import { SmartChartBlock } from '@/app/components/charts';
 import { SmartTableBlock } from '@/app/components/tables';
 import { SmartInsightBlock } from '@/app/components/insights';
 import { Sparkles, BarChart3, Table as TableIcon, ArrowLeftRight } from 'lucide-react';
+import { generateLayoutTheme, getDecorativeStyles } from '@/app/utils/themeStyles';
 
 type VisualMode = 'chart' | 'table' | null;
 
@@ -18,19 +19,18 @@ export const LayoutOverview: React.FC<LayoutProps> = ({
   totalPages = 1,
   isExport = false,
 }) => {
-  const logoColors = config.coverDesign?.colors;
-  const isDark = false;
-  const styles = {
-    bg: '#ffffff',
-    cardBg: '#ffffff',
-    border: 'border-slate-200',
-    accent: logoColors?.primary || config.theme.brandColor,
-  };
+  const contentMode = config.coverDesign?.contentMode || 'light';
+  const theme = generateLayoutTheme(
+    config.coverDesign?.colors,
+    config.theme.brandColor,
+    contentMode,
+  );
+  const decorStyles = getDecorativeStyles(theme);
+  const isDark = contentMode === 'dark';
 
   const visualMode: VisualMode = data.visualMode || null;
 
   const renderVisualArea = () => {
-    // If mode is selected, show the corresponding component
     if (visualMode === 'chart') {
       return (
         <div className="w-full h-full relative">
@@ -82,21 +82,26 @@ export const LayoutOverview: React.FC<LayoutProps> = ({
       );
     }
 
-    // No mode selected - show picker
     return (
       <div className="w-full h-full flex items-center justify-center gap-6">
         <button
           onClick={() => onUpdate('visualMode', 'chart')}
           className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl border-2 border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50/50 text-slate-400 hover:text-blue-500 transition-all group"
         >
-          <BarChart3 size={32} className="opacity-50 group-hover:opacity-80 group-hover:scale-110 transition-all" />
+          <BarChart3
+            size={32}
+            className="opacity-50 group-hover:opacity-80 group-hover:scale-110 transition-all"
+          />
           <span className="text-xs font-bold uppercase tracking-wider">Chart</span>
         </button>
         <button
           onClick={() => onUpdate('visualMode', 'table')}
           className="flex flex-col items-center justify-center gap-3 p-6 rounded-xl border-2 border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50/50 text-slate-400 hover:text-blue-500 transition-all group"
         >
-          <TableIcon size={32} className="opacity-50 group-hover:opacity-80 group-hover:scale-110 transition-all" />
+          <TableIcon
+            size={32}
+            className="opacity-50 group-hover:opacity-80 group-hover:scale-110 transition-all"
+          />
           <span className="text-xs font-bold uppercase tracking-wider">Table</span>
         </button>
       </div>
@@ -105,13 +110,37 @@ export const LayoutOverview: React.FC<LayoutProps> = ({
 
   return (
     <div
-      className="w-full h-full flex flex-col p-6 gap-4 pb-16 relative"
-      style={{ fontFamily: config.font.name, backgroundColor: styles.bg }}
+      className="w-full h-full flex flex-col p-6 gap-4 pb-16 relative overflow-hidden"
+      style={{ fontFamily: config.font.name, background: theme.pageBg }}
     >
+      {/* Decorative Elements */}
+      <div style={decorStyles.topRightCircle} />
+      <div style={decorStyles.bottomLeftCircle} />
+      <div style={decorStyles.accentLineTop} />
+
+      {/* Header */}
       <div
-        className={`h-[10%] shrink-0 border-b flex items-center justify-between pb-4 ${styles.border}`}
+        data-overview-header
+        className="h-[10%] shrink-0 rounded-xl p-4 flex items-center justify-between relative overflow-hidden"
+        style={{
+          backgroundColor: theme.cardBg,
+          border: `1px solid ${theme.border}`,
+          boxShadow: theme.cardShadow,
+        }}
       >
-        <EditableSlideTitle title={title} onChange={onTitleChange} isDark={isDark} />
+        {/* Header left accent bar */}
+        <div
+          className="absolute top-0 left-0 w-1 h-full rounded-l-xl"
+          style={{ background: theme.accentGradient }}
+        />
+        {/* Small decorative circle */}
+        <div
+          className="absolute -top-4 -right-4 w-20 h-20 rounded-full"
+          style={{ background: theme.decorCircle1 }}
+        />
+        <div className="flex-1 pl-3">
+          <EditableSlideTitle title={title} onChange={onTitleChange} isDark={isDark} />
+        </div>
         {data.channel && (
           <div className="ml-4">
             <ChannelBadge channel={data.channel} isDark={isDark} size="lg" />
@@ -119,21 +148,39 @@ export const LayoutOverview: React.FC<LayoutProps> = ({
         )}
       </div>
 
+      {/* Visual Area */}
       <div
-        className={`flex-1 min-h-0 rounded-xl border p-2 shadow-sm ${styles.border}`}
-        style={{ backgroundColor: styles.cardBg }}
+        data-overview-visual
+        className="flex-1 min-h-0 rounded-xl p-3 relative overflow-hidden"
+        style={{
+          backgroundColor: theme.cardBg,
+          border: `1px solid ${theme.border}`,
+          boxShadow: theme.cardShadow,
+        }}
       >
         {renderVisualArea()}
       </div>
 
+      {/* Insight */}
       <div
-        className={`h-[20%] shrink-0 rounded-xl border p-2 shadow-sm ${styles.border}`}
-        style={{ backgroundColor: styles.cardBg }}
+        data-overview-insight
+        className="h-[20%] shrink-0 rounded-xl p-3 relative overflow-hidden"
+        style={{
+          backgroundColor: theme.cardBg,
+          border: `1px solid ${theme.border}`,
+          boxShadow: theme.cardShadow,
+        }}
       >
+        <div
+          className="absolute -bottom-8 -right-8 w-24 h-24 rounded-full"
+          style={{
+            background: `radial-gradient(circle, ${theme.decorCircle2} 0%, transparent 70%)`,
+          }}
+        />
         <SmartInsightBlock
           icon={Sparkles}
           label="Comparative Analysis & Notes"
-          className="bg-blue-50/20 border-blue-200/50"
+          className="border-opacity-50"
           config={config}
           savedState={data.summary}
           onSave={(val) => onUpdate('summary', val)}
@@ -143,14 +190,16 @@ export const LayoutOverview: React.FC<LayoutProps> = ({
         />
       </div>
 
-      <SlideFooter
-        clientName={config.clientName}
-        period={config.period}
-        currentPage={currentPage}
-        totalPages={totalPages}
-        logo={config.coverDesign?.logoData}
-        brandColor={config.theme.brandColor}
-      />
+      <div data-overview-footer>
+        <SlideFooter
+          clientName={config.clientName}
+          period={config.period}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          logo={config.coverDesign?.logoData}
+          brandColor={theme.colors.primary}
+        />
+      </div>
     </div>
   );
 };

@@ -154,16 +154,17 @@ export function generateLayoutTheme(
     return {
       mode: 'dark',
 
-      // Page background - dark with subtle color tint
+      // Page background - dark with visible color tint from logo
       pageBg: `linear-gradient(135deg,
-        #0f172a 0%,
-        ${rgbaString(primaryRgb, 0.05)} 50%,
-        #0f172a 100%)`,
+        ${rgbaString(darkenColor(primaryRgb, 0.85), 1)} 0%,
+        ${rgbaString(primaryRgb, 0.15)} 40%,
+        ${rgbaString(secondaryRgb, 0.1)} 70%,
+        ${rgbaString(darkenColor(primaryRgb, 0.85), 1)} 100%)`,
 
-      // Header background - slightly lighter dark
+      // Header background - darker with color tint
       headerBg: `linear-gradient(135deg,
-        rgba(30, 41, 59, 0.8) 0%,
-        ${rgbaString(primaryRgb, 0.1)} 100%)`,
+        rgba(30, 41, 59, 0.85) 0%,
+        ${rgbaString(primaryRgb, 0.2)} 100%)`,
 
       // Card background - dark surface
       cardBg: 'rgba(30, 41, 59, 0.8)',
@@ -221,16 +222,16 @@ export function generateLayoutTheme(
   return {
     mode: 'light',
 
-    // Page background - subtle gradient from primary
+    // Page background - visible gradient from logo colors
     pageBg: `linear-gradient(135deg,
-      ${rgbaString(primaryRgb, 0.03)} 0%,
-      ${rgbaString(secondaryRgb, 0.02)} 50%,
-      ${rgbaString(accentRgb, 0.02)} 100%)`,
+      ${rgbaString(lightenColor(primaryRgb, 0.92), 1)} 0%,
+      ${rgbaString(lightenColor(secondaryRgb, 0.94), 1)} 50%,
+      ${rgbaString(lightenColor(accentRgb, 0.95), 1)} 100%)`,
 
-    // Header background - elegant gradient
+    // Header background - elegant gradient with logo colors
     headerBg: `linear-gradient(135deg,
-      ${rgbaString(primaryRgb, 0.08)} 0%,
-      ${rgbaString(secondaryRgb, 0.04)} 100%)`,
+      ${rgbaString(primaryRgb, 0.12)} 0%,
+      ${rgbaString(secondaryRgb, 0.06)} 100%)`,
 
     // Card background
     cardBg: '#ffffff',
@@ -254,9 +255,9 @@ export function generateLayoutTheme(
     accentGlow: `0 0 40px ${rgbaString(primaryRgb, 0.3)}`,
 
     // Decorative elements
-    decorCircle1: rgbaString(primaryRgb, 0.06),
-    decorCircle2: rgbaString(secondaryRgb, 0.05),
-    decorLine: rgbaString(accentRgb, 0.1),
+    decorCircle1: rgbaString(primaryRgb, 0.1),
+    decorCircle2: rgbaString(secondaryRgb, 0.08),
+    decorLine: rgbaString(accentRgb, 0.15),
 
     // Text colors
     headerText: isLightPrimary ? '#1e293b' : themeColors.primary,

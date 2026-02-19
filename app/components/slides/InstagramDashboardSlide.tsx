@@ -70,7 +70,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
   };
 
   const styles = {
-    bg: isDark ? config.theme.colors[0] : theme.pageBg,
+    bg: theme.pageBg,
     textMain: isDark ? 'text-white' : 'text-slate-900',
     textMuted: isDark ? 'text-slate-300' : 'text-slate-500',
     cardBg: isDark ? 'rgba(255,255,255,0.05)' : '#ffffff',

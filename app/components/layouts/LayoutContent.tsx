@@ -75,10 +75,7 @@ export const LayoutContent: React.FC<LayoutProps> = ({
       className="w-full h-full flex flex-col p-6 gap-4 pb-16 relative overflow-hidden"
       style={{ fontFamily: config.font.name, background: theme.pageBg }}
     >
-      {/* Decorative Elements */}
-      <div style={decorStyles.topRightCircle} />
-      <div style={decorStyles.bottomLeftCircle} />
-      <div style={decorStyles.accentLineTop} />
+      {/* Decorative elements removed for clean export */}
 
       <ContentSelectionModal
         isOpen={showModal}
@@ -89,18 +86,13 @@ export const LayoutContent: React.FC<LayoutProps> = ({
 
       {/* Header Section */}
       <div
+        data-content-header
         className="shrink-0 rounded-xl flex items-center justify-between px-5 py-3 relative overflow-hidden"
         style={{
           background: theme.headerBg,
           border: `1px solid ${theme.border}`,
         }}
       >
-        {/* Header accent bar */}
-        <div
-          className="absolute top-0 left-0 w-1 h-full rounded-l-xl"
-          style={{ background: theme.accentGradient }}
-        />
-
         <div className="flex items-center gap-3">
           <EditableSlideTitle title={title} onChange={onTitleChange} isDark={isDark} />
         </div>
@@ -127,6 +119,7 @@ export const LayoutContent: React.FC<LayoutProps> = ({
 
       {/* Content Grid */}
       <div
+        data-content-grid
         className={`grid flex-1 min-h-0 auto-rows-fr ${
           postCount === 4
             ? 'grid-cols-4 gap-3'
@@ -150,6 +143,7 @@ export const LayoutContent: React.FC<LayoutProps> = ({
           posts.map((post, i) => (
             <div
               key={i}
+              data-content-post={i}
               className={`${postCount >= 6 ? 'rounded-lg' : 'rounded-xl'} overflow-hidden flex flex-col transition-all duration-300 hover:scale-[1.02] group h-full`}
               style={{
                 backgroundColor: theme.cardBg,
@@ -158,9 +152,7 @@ export const LayoutContent: React.FC<LayoutProps> = ({
               }}
             >
               {/* Image Section */}
-              <div
-                className="relative bg-slate-50/50 flex items-center justify-center overflow-hidden flex-1 min-h-0"
-              >
+              <div className="relative bg-slate-50/50 flex items-center justify-center overflow-hidden flex-1 min-h-0">
                 {post.image ? (
                   <img
                     src={post.image}
@@ -177,7 +169,7 @@ export const LayoutContent: React.FC<LayoutProps> = ({
                 {/* Filter type badge */}
                 {filterType === 'mixed' && (
                   <div
-                    className={`absolute ${postCount >= 6 ? 'top-1 left-1 text-[5px] px-1 py-0.5' : 'top-2 left-2 text-[8px] px-2 py-1'} font-bold rounded-full text-white shadow-md z-10`}
+                    className={`absolute whitespace-nowrap ${postCount >= 6 ? 'top-1 left-1 text-[6px] px-1.5 py-0.5' : 'top-2 left-2 text-[8px] px-2 py-1'} font-bold rounded-full text-white shadow-md z-10`}
                     style={{
                       background:
                         i < postCount / 2
@@ -203,17 +195,12 @@ export const LayoutContent: React.FC<LayoutProps> = ({
                 className={`${postCount === 4 ? 'p-3' : postCount === 6 ? 'p-2' : 'p-1.5'} relative shrink-0`}
                 style={{ borderTop: `1px solid ${theme.borderLight}` }}
               >
-                {/* Card accent line */}
-                <div
-                  className="absolute bottom-0 left-1 right-1 h-[1px] rounded-full opacity-50"
-                  style={{ background: theme.accentLine }}
-                />
-
                 <div
                   className={`flex items-center justify-between ${postCount === 4 ? 'mb-2 pb-2' : 'mb-1 pb-1'}`}
                   style={{ borderBottom: `1px solid ${theme.borderLight}` }}
                 >
                   <span
+                    data-post-id
                     className={`${postCount === 4 ? 'text-xs' : postCount === 6 ? 'text-[10px]' : 'text-[8px]'} font-bold truncate`}
                     style={{ color: theme.bodyText }}
                   >
@@ -232,21 +219,34 @@ export const LayoutContent: React.FC<LayoutProps> = ({
                   <span className="font-medium truncate" style={{ color: theme.mutedText }}>
                     {postCount === 4 ? 'Reach' : 'Rch'}
                   </span>
-                  <span className="font-mono text-right" style={{ color: theme.bodyText }}>
-                    {postCount === 4 ? post.reach.toLocaleString() : (post.reach / 1000).toFixed(0) + 'K'}
+                  <span
+                    data-post-reach
+                    className="font-mono text-right"
+                    style={{ color: theme.bodyText }}
+                  >
+                    {postCount === 4
+                      ? post.reach.toLocaleString()
+                      : (post.reach / 1000).toFixed(0) + 'K'}
                   </span>
 
                   <span className="font-medium truncate" style={{ color: theme.mutedText }}>
                     {postCount === 4 ? 'Engagement' : 'Eng'}
                   </span>
-                  <span className="font-mono text-right" style={{ color: theme.bodyText }}>
-                    {postCount === 4 ? post.engagement.toLocaleString() : (post.engagement / 1000).toFixed(1) + 'K'}
+                  <span
+                    data-post-engagement
+                    className="font-mono text-right"
+                    style={{ color: theme.bodyText }}
+                  >
+                    {postCount === 4
+                      ? post.engagement.toLocaleString()
+                      : (post.engagement / 1000).toFixed(1) + 'K'}
                   </span>
 
                   <span className="font-medium truncate" style={{ color: theme.mutedText }}>
                     {postCount === 4 ? 'Eng. Rate' : 'ER'}
                   </span>
                   <span
+                    data-post-er
                     className="font-bold text-right"
                     style={{
                       color: parseFloat(post.er) > 2.5 ? '#10b981' : '#f59e0b',
@@ -263,6 +263,7 @@ export const LayoutContent: React.FC<LayoutProps> = ({
 
       {/* Insights Panel */}
       <div
+        data-content-insight
         className="h-[18%] shrink-0 rounded-xl p-3 relative overflow-hidden"
         style={{
           backgroundColor: theme.cardBg,
@@ -270,20 +271,6 @@ export const LayoutContent: React.FC<LayoutProps> = ({
           boxShadow: theme.cardShadow,
         }}
       >
-        {/* Bottom accent line */}
-        <div
-          className="absolute bottom-0 left-4 right-4 h-[2px] rounded-full"
-          style={{ background: theme.accentLine }}
-        />
-
-        {/* Decorative element */}
-        <div
-          className="absolute -bottom-6 -right-6 w-20 h-20 rounded-full"
-          style={{
-            background: `radial-gradient(circle, ${theme.decorCircle1} 0%, transparent 70%)`,
-          }}
-        />
-
         <SmartInsightBlock
           icon={Sparkles}
           label="Visual Strategy Notes & Insights"
@@ -297,14 +284,16 @@ export const LayoutContent: React.FC<LayoutProps> = ({
         />
       </div>
 
-      <SlideFooter
-        clientName={config.clientName}
-        period={config.period}
-        currentPage={currentPage}
-        totalPages={totalPages}
-        logo={config.coverDesign?.logoData}
-        brandColor={theme.colors.primary}
-      />
+      <div data-content-footer>
+        <SlideFooter
+          clientName={config.clientName}
+          period={config.period}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          logo={config.coverDesign?.logoData}
+          brandColor={theme.colors.primary}
+        />
+      </div>
     </div>
   );
 };

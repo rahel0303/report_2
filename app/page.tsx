@@ -30,7 +30,7 @@ import { getDummyDataForTemplate } from './data/dummyData';
 // Import components
 import { AppHeader, Toasts } from './components/report';
 import { PlaceholderSlide, ReportCoverVisual, InstagramDashboardSlide, SectionHeadingSlide } from './components/slides';
-import { LayoutDashboard, LayoutComparison, LayoutKPI, LayoutContent } from './components/layouts';
+import { LayoutDashboard, LayoutComparison, LayoutKPI, LayoutContent, LayoutOverview } from './components/layouts';
 import { CoverDesigner } from './components/covers/CoverDesigner';
 import { CustomCover } from './components/covers/CustomCover';
 import {
@@ -1421,6 +1421,15 @@ const ReportSetupInterface: React.FC = () => {
                 <LayoutContent
                   config={config}
                   data={slide.content}
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  isExport={true}
+                />
+              ) : slide.type === 'layout_overview' ? (
+                <LayoutOverview
+                  config={config}
+                  data={slide.content}
+                  title={slide.title}
                   currentPage={currentPage}
                   totalPages={totalPages}
                   isExport={true}

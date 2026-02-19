@@ -1,4 +1,4 @@
-import PptxGenJS from 'pptxgenjs';
+﻿import PptxGenJS from 'pptxgenjs';
 import { ReportConfig, Slide } from '@/app/types';
 
 // Re-export for backwards compatibility
@@ -7,6 +7,74 @@ export type { ReportConfig };
 
 // Helper to convert hex to RGB without #
 const cleanColor = (hex: string) => hex.replace('#', '');
+
+// Helper to convert hex to RGB object
+function hexToRgbObj(hex: string): { r: number; g: number; b: number } {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result
+    ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16),
+      }
+    : { r: 59, g: 130, b: 246 };
+}
+
+// Helper to blend color with opacity over base color
+function blendColorWithOpacity(
+  rgb: { r: number; g: number; b: number },
+  opacity: number,
+  baseIsDark: boolean,
+): string {
+  const base = baseIsDark ? { r: 15, g: 23, b: 42 } : { r: 248, g: 250, b: 252 };
+  const blended = {
+    r: Math.round(base.r * (1 - opacity) + rgb.r * opacity),
+    g: Math.round(base.g * (1 - opacity) + rgb.g * opacity),
+    b: Math.round(base.b * (1 - opacity) + rgb.b * opacity),
+  };
+  return `${blended.r.toString(16).padStart(2, '0')}${blended.g.toString(16).padStart(2, '0')}${blended.b.toString(16).padStart(2, '0')}`.toUpperCase();
+}
+
+// Helper to get gradient background colors from theme
+function getThemeGradientColors(config: ReportConfig, isDark: boolean) {
+  const primaryHex = config.coverDesign?.colors?.primary || config.theme?.brandColor || '#3B82F6';
+  const secondaryHex = config.coverDesign?.colors?.secondary || '#10B981';
+  const accentHex = config.coverDesign?.colors?.accent || '#EC4899';
+
+  const primaryRgb = hexToRgbObj(primaryHex);
+  const secondaryRgb = hexToRgbObj(secondaryHex);
+  const accentRgb = hexToRgbObj(accentHex);
+
+  if (isDark) {
+    // Dark mode: darken primary → primary tint → darken primary (match themeStyles)
+    const darkened = {
+      r: Math.max(0, Math.round(primaryRgb.r * 0.15)),
+      g: Math.max(0, Math.round(primaryRgb.g * 0.15)),
+      b: Math.max(0, Math.round(primaryRgb.b * 0.15)),
+    };
+    return {
+      start:
+        `${darkened.r.toString(16).padStart(2, '0')}${darkened.g.toString(16).padStart(2, '0')}${darkened.b.toString(16).padStart(2, '0')}`.toUpperCase(),
+      middle: blendColorWithOpacity(primaryRgb, 0.15, true),
+      middleSecondary: blendColorWithOpacity(secondaryRgb, 0.1, true),
+      end: `${darkened.r.toString(16).padStart(2, '0')}${darkened.g.toString(16).padStart(2, '0')}${darkened.b.toString(16).padStart(2, '0')}`.toUpperCase(),
+    };
+  } else {
+    // Light mode: matches themeStyles.ts exactly — lightenColor(rgb, 0.92/0.94/0.95)
+    // pageBg: lighten(primary 92%) → lighten(secondary 94%) → lighten(accent 95%)
+    const lightenToHex = (rgb: { r: number; g: number; b: number }, amount: number) => {
+      const r = Math.min(255, Math.round(rgb.r + (255 - rgb.r) * amount));
+      const g = Math.min(255, Math.round(rgb.g + (255 - rgb.g) * amount));
+      const b = Math.min(255, Math.round(rgb.b + (255 - rgb.b) * amount));
+      return `${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`.toUpperCase();
+    };
+    return {
+      start: lightenToHex(primaryRgb, 0.92),
+      middle: lightenToHex(secondaryRgb, 0.94),
+      end: lightenToHex(accentRgb, 0.95),
+    };
+  }
+}
 
 // Helper to get chart colors from theme
 const getChartColors = (config: ReportConfig): string[] => {
@@ -21,6 +89,313 @@ const getChartColors = (config: ReportConfig): string[] => {
   // Fallback to default colors
   return ['3B82F6', '10B981', 'EC4899', '8B5CF6'];
 };
+
+// ─── Shared Layout Helpers ───────────────────────────────────────
+
+interface SlideThemeVars {
+  font: string;
+  isDark: boolean;
+  textColor: string;
+  mutedColor: string;
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  cardBg: string;
+  borderColor: string;
+  pageBg: string;
+}
+
+/** Extract common theme variables from config */
+function getSlideThemeVars(config: ReportConfig): SlideThemeVars {
+  const isDark = (config.coverDesign?.contentMode || 'light') === 'dark';
+  return {
+    font: config.font?.name || 'Inter',
+    isDark,
+    textColor: isDark ? 'FFFFFF' : '1E293B',
+    mutedColor: isDark ? 'CBD5E1' : '64748B',
+    primaryColor: cleanColor(
+      config.coverDesign?.colors?.primary || config.theme?.brandColor || '#3B82F6',
+    ),
+    secondaryColor: cleanColor(config.coverDesign?.colors?.secondary || '#10B981'),
+    accentColor: cleanColor(config.coverDesign?.colors?.accent || '#EC4899'),
+    cardBg: isDark ? '1E293B' : 'FFFFFF',
+    borderColor: isDark ? '334155' : 'E2E8F0',
+    pageBg: isDark ? '0F172A' : 'F8FAFC',
+  };
+}
+
+/** Draw background with gradient overlay matching logo colors */
+function drawSlideBackground(
+  slide: PptxGenJS.Slide,
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  tv: SlideThemeVars,
+) {
+  const gc = getThemeGradientColors(config, tv.isDark);
+
+  // Helper: parse a hex color to RGB object
+  const hexToRgbLocal = (hex: string) => ({
+    r: parseInt(hex.slice(0, 2), 16),
+    g: parseInt(hex.slice(2, 4), 16),
+    b: parseInt(hex.slice(4, 6), 16),
+  });
+
+  // Helper: interpolate between two hex colors at position t (0..1), output hex
+  const lerpHex = (a: string, b: string, t: number) => {
+    const ca = hexToRgbLocal(a);
+    const cb = hexToRgbLocal(b);
+    const r = Math.round(ca.r + (cb.r - ca.r) * t);
+    const g = Math.round(ca.g + (cb.g - ca.g) * t);
+    const bl = Math.round(ca.b + (cb.b - ca.b) * t);
+    return `${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${bl.toString(16).padStart(2, '0')}`.toUpperCase();
+  };
+
+  // Set solid base background (start color) so no white bleeds through
+  slide.background = { color: gc.start };
+
+  // Draw 20 thin vertical strips to approximate a smooth diagonal gradient
+  const NUM_STRIPS = 20;
+  const stripW = 10 / NUM_STRIPS;
+
+  for (let i = 0; i < NUM_STRIPS; i++) {
+    const t = i / (NUM_STRIPS - 1); // 0 → 1
+    let color: string;
+    if (t <= 0.5) {
+      color = lerpHex(gc.start, gc.middle, t * 2);
+    } else {
+      color = lerpHex(gc.middle, gc.end, (t - 0.5) * 2);
+    }
+    if (tv.isDark) {
+      // For dark mode also interpolate through middleSecondary
+      if (t <= 0.33) {
+        color = lerpHex(gc.start, gc.middle, t / 0.33);
+      } else if (t <= 0.66) {
+        color = lerpHex(gc.middle, (gc as any).middleSecondary || gc.middle, (t - 0.33) / 0.33);
+      } else {
+        color = lerpHex((gc as any).middleSecondary || gc.middle, gc.end, (t - 0.66) / 0.34);
+      }
+    }
+    slide.addShape(pptx.ShapeType.rect, {
+      x: i * stripW,
+      y: 0,
+      w: stripW + 0.02, // slight overlap to avoid hairline gaps
+      h: 5.625,
+      fill: { color },
+      line: { type: 'none' },
+    });
+  }
+}
+
+/** Draw decorative elements: accent line top + circles */
+function drawSlideDecorations(slide: PptxGenJS.Slide, pptx: PptxGenJS, tv: SlideThemeVars) {
+  // Accent line at top (3px → ~0.04 inch, gradient approximated as solid primary)
+  slide.addShape(pptx.ShapeType.rect, {
+    x: 0,
+    y: 0,
+    w: 10,
+    h: 0.04,
+    fill: { color: tv.primaryColor },
+    line: { type: 'none' },
+  });
+
+  // Top-right decorative circle (semi-transparent)
+  slide.addShape(pptx.ShapeType.ellipse, {
+    x: 8.5,
+    y: -0.6,
+    w: 2,
+    h: 2,
+    fill: { color: tv.primaryColor, transparency: tv.isDark ? 85 : 90 },
+    line: { type: 'none' },
+  });
+
+  // Bottom-left decorative circle
+  slide.addShape(pptx.ShapeType.ellipse, {
+    x: -0.4,
+    y: 4.2,
+    w: 1.6,
+    h: 1.6,
+    fill: { color: tv.secondaryColor, transparency: tv.isDark ? 88 : 92 },
+    line: { type: 'none' },
+  });
+}
+
+/** Draw standard header card with accent bar, title, channel badge */
+function drawSlideHeader(
+  slide: PptxGenJS.Slide,
+  pptx: PptxGenJS,
+  tv: SlideThemeVars,
+  title: string,
+  channel?: string,
+  opts?: { headerH?: number; headerY?: number },
+) {
+  const headerX = 0.3;
+  const headerY = opts?.headerY ?? 0.3;
+  const headerW = 9.4;
+  const headerH = opts?.headerH ?? 0.55;
+
+  // Card background
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: headerX,
+    y: headerY,
+    w: headerW,
+    h: headerH,
+    fill: { color: tv.cardBg },
+    line: { color: tv.borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: {
+      type: 'outer',
+      blur: 6,
+      offset: 2,
+      color: tv.primaryColor,
+      opacity: tv.isDark ? 0.1 : 0.06,
+    },
+  });
+
+  // Left accent bar (gradient approximated as primary color)
+  slide.addShape(pptx.ShapeType.rect, {
+    x: headerX,
+    y: headerY,
+    w: 0.04,
+    h: headerH,
+    fill: { color: tv.primaryColor },
+    line: { type: 'none' },
+  });
+
+  // Decorative circle top-right corner
+  slide.addShape(pptx.ShapeType.ellipse, {
+    x: headerX + headerW - 0.6,
+    y: headerY - 0.2,
+    w: 0.8,
+    h: 0.8,
+    fill: { color: tv.primaryColor, transparency: tv.isDark ? 85 : 90 },
+    line: { type: 'none' },
+  });
+
+  // Title text
+  slide.addText(title, {
+    x: headerX + 0.2,
+    y: headerY + 0.03,
+    w: headerW - 1.2,
+    h: headerH - 0.06,
+    fontSize: 18,
+    bold: true,
+    color: tv.textColor,
+    align: 'left',
+    valign: 'middle',
+    fontFace: tv.font,
+  });
+
+  // Channel badge
+  if (channel) {
+    const badgeSvg = getChannelBadgeSvg(channel);
+    if (badgeSvg) {
+      slide.addImage({
+        data: badgeSvg,
+        x: headerX + headerW - 0.5,
+        y: headerY + 0.06,
+        w: 0.42,
+        h: 0.42,
+      });
+    }
+  }
+
+  return { headerX, headerY, headerW, headerH };
+}
+
+/** Draw insight card with decorative circle, label, separator, and text */
+function drawSlideInsight(
+  slide: PptxGenJS.Slide,
+  pptx: PptxGenJS,
+  tv: SlideThemeVars,
+  opts: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    label: string;
+    text: string;
+  },
+) {
+  // Card background
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: opts.x,
+    y: opts.y,
+    w: opts.w,
+    h: opts.h,
+    fill: { color: tv.cardBg },
+    line: { color: tv.borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: {
+      type: 'outer',
+      blur: 6,
+      offset: 2,
+      color: tv.primaryColor,
+      opacity: tv.isDark ? 0.1 : 0.06,
+    },
+  });
+
+  // Decorative circle bottom-right
+  slide.addShape(pptx.ShapeType.ellipse, {
+    x: opts.x + opts.w - 0.8,
+    y: opts.y + opts.h - 0.8,
+    w: 1,
+    h: 1,
+    fill: { color: tv.secondaryColor, transparency: tv.isDark ? 88 : 92 },
+    line: { type: 'none' },
+  });
+
+  // Label
+  slide.addText(opts.label.toUpperCase(), {
+    x: opts.x + 0.15,
+    y: opts.y + 0.08,
+    w: opts.w - 0.3,
+    h: 0.22,
+    fontSize: 9,
+    bold: true,
+    color: tv.mutedColor,
+    fontFace: tv.font,
+    align: 'left',
+    valign: 'middle',
+  });
+
+  // Separator line
+  slide.addShape(pptx.ShapeType.line, {
+    x: opts.x + 0.15,
+    y: opts.y + 0.35,
+    w: opts.w - 0.3,
+    h: 0,
+    line: { color: tv.borderColor, width: 0.5 },
+  });
+
+  // Content text
+  if (opts.text) {
+    slide.addText(opts.text, {
+      x: opts.x + 0.15,
+      y: opts.y + 0.42,
+      w: opts.w - 0.3,
+      h: opts.h - 0.55,
+      fontSize: 9,
+      color: tv.isDark ? 'CBD5E1' : '475569',
+      align: 'left',
+      valign: 'top',
+      fontFace: tv.font,
+      lineSpacingMultiple: 1.3,
+      wrap: true,
+    });
+  } else {
+    slide.addText(opts.label, {
+      x: opts.x,
+      y: opts.y,
+      w: opts.w,
+      h: opts.h,
+      fontSize: 12,
+      color: tv.mutedColor,
+      align: 'center',
+      valign: 'middle',
+      fontFace: tv.font,
+    });
+  }
+}
 
 // ─── Hybrid Cover Slide (screenshot bg + native text) ───────────
 
@@ -59,7 +434,10 @@ export function createCoverSlideHybrid(pptx: PptxGenJS, config: ReportConfig, bg
   // Background: pixel-perfect screenshot
   slide.addImage({
     data: bgImageData,
-    x: 0, y: 0, w: '100%', h: '100%',
+    x: 0,
+    y: 0,
+    w: '100%',
+    h: '100%',
   });
 
   const s = getCoverTextStyle(templateId, config.coverDesign?.colors?.primary || '#3B82F6');
@@ -80,37 +458,61 @@ export function createCoverSlideHybrid(pptx: PptxGenJS, config: ReportConfig, bg
 
   // Title
   slide.addText(config.reportTitle, {
-    x: s.xOffset, y: 1.8, w: s.textWidth, h: 1.2,
-    fontSize: s.titleSize, bold: true, color: s.titleColor,
-    align: s.align, valign: 'middle', fontFace: font,
+    x: s.xOffset,
+    y: 1.8,
+    w: s.textWidth,
+    h: 1.2,
+    fontSize: s.titleSize,
+    bold: true,
+    color: s.titleColor,
+    align: s.align,
+    valign: 'middle',
+    fontFace: font,
   });
 
   // Subtitle
   if (config.reportDetails) {
     slide.addText(config.reportDetails, {
-      x: s.xOffset, y: 3.1, w: s.textWidth, h: 0.6,
-      fontSize: s.subtitleSize, color: s.subtitleColor,
+      x: s.xOffset,
+      y: 3.1,
+      w: s.textWidth,
+      h: 0.6,
+      fontSize: s.subtitleSize,
+      color: s.subtitleColor,
       transparency: s.subtitleTransparency,
-      align: s.align, valign: 'middle', fontFace: font,
+      align: s.align,
+      valign: 'middle',
+      fontFace: font,
     });
   }
 
   // Period
   if (config.period) {
     slide.addText(config.period, {
-      x: s.xOffset, y: 3.8, w: s.textWidth, h: 0.5,
-      fontSize: 18, color: s.periodColor,
+      x: s.xOffset,
+      y: 3.8,
+      w: s.textWidth,
+      h: 0.5,
+      fontSize: 18,
+      color: s.periodColor,
       transparency: s.periodTransparency,
-      align: s.align, valign: 'middle', fontFace: font,
+      align: s.align,
+      valign: 'middle',
+      fontFace: font,
     });
   }
 
   // Prepared by footer
   slide.addText(`Prepared by: ${config.preparedBy}`, {
-    x: s.xOffset, y: 5.1, w: s.textWidth, h: 0.3,
-    fontSize: 10, color: s.footerColor,
+    x: s.xOffset,
+    y: 5.1,
+    w: s.textWidth,
+    h: 0.3,
+    fontSize: 10,
+    color: s.footerColor,
     transparency: s.footerTransparency,
-    align: s.align, fontFace: font,
+    align: s.align,
+    fontFace: font,
   });
 }
 
@@ -124,32 +526,61 @@ export function createCoverSlide(pptx: PptxGenJS, config: ReportConfig) {
   slide.background = { color: '3B82F6' };
 
   slide.addShape(pptx.ShapeType.rect, {
-    x: 0, y: 0, w: 10, h: 0.4,
-    fill: { color: '8B5CF6' }, line: { type: 'none' },
+    x: 0,
+    y: 0,
+    w: 10,
+    h: 0.4,
+    fill: { color: '8B5CF6' },
+    line: { type: 'none' },
   });
 
   slide.addText(config.reportTitle, {
-    x: 0.5, y: 2, w: 9, h: 1.2,
-    fontSize: 48, bold: true, color: 'FFFFFF',
-    align: 'center', valign: 'middle', fontFace: font,
+    x: 0.5,
+    y: 2,
+    w: 9,
+    h: 1.2,
+    fontSize: 48,
+    bold: true,
+    color: 'FFFFFF',
+    align: 'center',
+    valign: 'middle',
+    fontFace: font,
   });
 
   slide.addText(config.reportDetails || '', {
-    x: 0.5, y: 3.3, w: 9, h: 0.6,
-    fontSize: 20, color: 'FFFFFF',
-    align: 'center', valign: 'middle', fontFace: font,
+    x: 0.5,
+    y: 3.3,
+    w: 9,
+    h: 0.6,
+    fontSize: 20,
+    color: 'FFFFFF',
+    align: 'center',
+    valign: 'middle',
+    fontFace: font,
   });
 
   slide.addText(config.period, {
-    x: 0.5, y: 4.1, w: 9, h: 0.4,
-    fontSize: 16, color: 'FFFFFF',
-    align: 'center', valign: 'middle', fontFace: font,
+    x: 0.5,
+    y: 4.1,
+    w: 9,
+    h: 0.4,
+    fontSize: 16,
+    color: 'FFFFFF',
+    align: 'center',
+    valign: 'middle',
+    fontFace: font,
   });
 
   slide.addText(`Prepared by: ${config.preparedBy}`, {
-    x: 0.5, y: 5.2, w: 9, h: 0.3,
-    fontSize: 10, color: 'FFFFFF', transparency: 40,
-    align: 'center', fontFace: font,
+    x: 0.5,
+    y: 5.2,
+    w: 9,
+    h: 0.3,
+    fontSize: 10,
+    color: 'FFFFFF',
+    transparency: 40,
+    align: 'center',
+    fontFace: font,
   });
 }
 
@@ -170,14 +601,24 @@ export function createSectionHeadingSlideHybrid(
   // Background: pixel-perfect screenshot (gradients, shapes, decorative elements)
   slide.addImage({
     data: bgImageData,
-    x: 0, y: 0, w: '100%', h: '100%',
+    x: 0,
+    y: 0,
+    w: '100%',
+    h: '100%',
   });
 
   // Section title – centered, white, large
   slide.addText(sectionTitle, {
-    x: 0.5, y: 1.8, w: 9, h: 2,
-    fontSize: 48, bold: true, color: 'FFFFFF',
-    align: 'center', valign: 'middle', fontFace: font,
+    x: 0.5,
+    y: 1.8,
+    w: 9,
+    h: 2,
+    fontSize: 48,
+    bold: true,
+    color: 'FFFFFF',
+    align: 'center',
+    valign: 'middle',
+    fontFace: font,
   });
 }
 
@@ -198,16 +639,26 @@ export function createSectionHeadingSlide(
 
   // Gradient overlay
   slide.addShape(pptx.ShapeType.rect, {
-    x: 0, y: 0, w: 10, h: 5.625,
+    x: 0,
+    y: 0,
+    w: 10,
+    h: 5.625,
     fill: { color: cleanColor(secondaryColor), transparency: 50 },
     line: { type: 'none' },
   });
 
   // Title
   slide.addText(sectionTitle, {
-    x: 0.5, y: 1.8, w: 9, h: 2,
-    fontSize: 48, bold: true, color: 'FFFFFF',
-    align: 'center', valign: 'middle', fontFace: font,
+    x: 0.5,
+    y: 1.8,
+    w: 9,
+    h: 2,
+    fontSize: 48,
+    bold: true,
+    color: 'FFFFFF',
+    align: 'center',
+    valign: 'middle',
+    fontFace: font,
   });
 }
 
@@ -215,7 +666,7 @@ export function createSectionHeadingSlide(
 
 interface DashboardExportData {
   takeaways?: string[];
-  tableData?: string[][];  // extracted from DOM: rows × columns
+  tableData?: string[][]; // extracted from DOM: rows × columns
 }
 
 /** Generate the same chart data used in the React component (fixed seed) */
@@ -235,7 +686,7 @@ function generateDashboardChartData() {
     if (reachSpikes.includes(i)) {
       reach += 2200000;
     } else {
-      reach += (i * 37 % 400000) - 200000;
+      reach += ((i * 37) % 400000) - 200000;
     }
     reachValues.push(Math.max(0, Math.floor(reach)));
 
@@ -243,7 +694,7 @@ function generateDashboardChartData() {
     if (growthSpikes.includes(i)) {
       growth += 4500;
     } else {
-      growth += (i * 23 % 300) - 150;
+      growth += ((i * 23) % 300) - 150;
     }
     growthValues.push(Math.max(0, Math.floor(growth)));
   }
@@ -257,35 +708,80 @@ function generateDashboardChartData() {
 export function createDashboardSlideHybrid(
   pptx: PptxGenJS,
   config: ReportConfig,
-  bgImageData: string,
+  _bgImageData: string,
   slideData: DashboardExportData,
 ) {
   const slide = pptx.addSlide();
-  const font = config.font?.name || 'Inter';
-  const isDark = (config.coverDesign?.contentMode || 'light') === 'dark';
-  const textColor = isDark ? 'FFFFFF' : '1E293B';
-  const mutedColor = isDark ? 'CBD5E1' : '64748B';
-  const primaryColor = cleanColor(config.coverDesign?.colors?.primary || config.theme?.brandColor || '#3B82F6');
-  const secondaryColor = cleanColor(config.coverDesign?.colors?.secondary || '#10B981');
-  const bgColor = isDark ? cleanColor(config.theme.colors[0]) : 'F8FAFC';
+  const tv = getSlideThemeVars(config);
+  const font = tv.font;
+  const isDark = tv.isDark;
+  const textColor = tv.textColor;
+  const mutedColor = tv.mutedColor;
+  const primaryColor = tv.primaryColor;
+  const secondaryColor = tv.secondaryColor;
 
-  // Screenshot background (header + decorative elements only)
-  slide.addImage({
-    data: bgImageData,
-    x: 0, y: 0, w: '100%', h: '100%',
+  // Fully native background + decorations (no screenshot)
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+
+  // === Header card ===
+  const headerX = 0.22;
+  const headerY = 0.08;
+  const headerW = 9.56;
+  const headerH = 0.6;
+
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: headerX,
+    y: headerY,
+    w: headerW,
+    h: headerH,
+    fill: { color: tv.cardBg },
+    line: { color: tv.borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: {
+      type: 'outer',
+      blur: 6,
+      offset: 2,
+      color: tv.primaryColor,
+      opacity: isDark ? 0.1 : 0.06,
+    },
   });
 
-  // === Header text overlays ===
+  // Left accent bar
+  slide.addShape(pptx.ShapeType.rect, {
+    x: headerX,
+    y: headerY,
+    w: 0.04,
+    h: headerH,
+    fill: { color: primaryColor },
+    line: { type: 'none' },
+  });
+
+  // Header text
   slide.addText('Instagram Performance', {
-    x: 0.55, y: 0.08, w: 3.5, h: 0.3,
-    fontSize: 18, bold: true, color: textColor,
-    align: 'left', valign: 'middle', fontFace: font,
+    x: headerX + 0.2,
+    y: headerY + 0.02,
+    w: 3.5,
+    h: 0.3,
+    fontSize: 18,
+    bold: true,
+    color: textColor,
+    align: 'left',
+    valign: 'middle',
+    fontFace: font,
   });
 
   slide.addText(`${config.period} Report`, {
-    x: 0.55, y: 0.38, w: 3, h: 0.2,
-    fontSize: 10, bold: true, color: mutedColor,
-    align: 'left', valign: 'middle', fontFace: font,
+    x: headerX + 0.2,
+    y: headerY + 0.32,
+    w: 3,
+    h: 0.2,
+    fontSize: 10,
+    bold: true,
+    color: mutedColor,
+    align: 'left',
+    valign: 'middle',
+    fontFace: font,
   });
 
   // Metric cards
@@ -298,19 +794,40 @@ export function createDashboardSlideHybrid(
   metrics.forEach((m, idx) => {
     const xPos = 5.8 + idx * 1.5;
     slide.addText(m.label, {
-      x: xPos, y: 0.06, w: 1.4, h: 0.18,
-      fontSize: 8, bold: true, color: mutedColor,
-      align: 'left', valign: 'middle', fontFace: font,
+      x: xPos,
+      y: headerY + 0.02,
+      w: 1.4,
+      h: 0.18,
+      fontSize: 8,
+      bold: true,
+      color: mutedColor,
+      align: 'left',
+      valign: 'middle',
+      fontFace: font,
     });
     slide.addText(m.value, {
-      x: xPos, y: 0.22, w: 1.0, h: 0.35,
-      fontSize: 24, bold: true, color: textColor,
-      align: 'left', valign: 'middle', fontFace: font,
+      x: xPos,
+      y: headerY + 0.16,
+      w: 1.0,
+      h: 0.3,
+      fontSize: 22,
+      bold: true,
+      color: textColor,
+      align: 'left',
+      valign: 'middle',
+      fontFace: font,
     });
     slide.addText(m.trend, {
-      x: xPos + 0.65, y: 0.28, w: 0.7, h: 0.2,
-      fontSize: 8, bold: true, color: m.trendColor,
-      align: 'left', valign: 'middle', fontFace: font,
+      x: xPos + 0.6,
+      y: headerY + 0.22,
+      w: 0.7,
+      h: 0.2,
+      fontSize: 8,
+      bold: true,
+      color: m.trendColor,
+      align: 'left',
+      valign: 'middle',
+      fontFace: font,
     });
   });
 
@@ -323,7 +840,10 @@ export function createDashboardSlideHybrid(
 
   // Chart card background
   slide.addShape(pptx.ShapeType.roundRect, {
-    x: chartAreaX, y: chartAreaY, w: chartAreaW, h: chartAreaH,
+    x: chartAreaX,
+    y: chartAreaY,
+    w: chartAreaW,
+    h: chartAreaH,
     fill: { color: isDark ? '1E293B' : 'FFFFFF' },
     line: { color: isDark ? '334155' : 'E2E8F0', width: 0.75 },
     rectRadius: 0.1,
@@ -331,56 +851,85 @@ export function createDashboardSlideHybrid(
 
   // Chart title
   slide.addText('Daily Trends (Reach vs Growth)', {
-    x: chartAreaX + 0.15, y: chartAreaY + 0.05, w: 3, h: 0.25,
-    fontSize: 11, bold: true, color: textColor,
-    align: 'left', valign: 'middle', fontFace: font,
+    x: chartAreaX + 0.15,
+    y: chartAreaY + 0.05,
+    w: 3,
+    h: 0.25,
+    fontSize: 11,
+    bold: true,
+    color: textColor,
+    align: 'left',
+    valign: 'middle',
+    fontFace: font,
   });
 
   // Legend
   slide.addShape(pptx.ShapeType.ellipse, {
-    x: chartAreaX + chartAreaW - 2.0, y: chartAreaY + 0.1, w: 0.12, h: 0.12,
-    fill: { color: secondaryColor }, line: { type: 'none' },
+    x: chartAreaX + chartAreaW - 2.0,
+    y: chartAreaY + 0.1,
+    w: 0.12,
+    h: 0.12,
+    fill: { color: secondaryColor },
+    line: { type: 'none' },
   });
   slide.addText('Growth', {
-    x: chartAreaX + chartAreaW - 1.85, y: chartAreaY + 0.05, w: 0.6, h: 0.2,
-    fontSize: 8, color: mutedColor, fontFace: font,
+    x: chartAreaX + chartAreaW - 1.85,
+    y: chartAreaY + 0.05,
+    w: 0.6,
+    h: 0.2,
+    fontSize: 8,
+    color: mutedColor,
+    fontFace: font,
   });
   slide.addShape(pptx.ShapeType.ellipse, {
-    x: chartAreaX + chartAreaW - 1.1, y: chartAreaY + 0.1, w: 0.12, h: 0.12,
-    fill: { color: primaryColor }, line: { type: 'none' },
+    x: chartAreaX + chartAreaW - 1.1,
+    y: chartAreaY + 0.1,
+    w: 0.12,
+    h: 0.12,
+    fill: { color: primaryColor },
+    line: { type: 'none' },
   });
   slide.addText('Reach', {
-    x: chartAreaX + chartAreaW - 0.95, y: chartAreaY + 0.05, w: 0.6, h: 0.2,
-    fontSize: 8, color: mutedColor, fontFace: font,
+    x: chartAreaX + chartAreaW - 0.95,
+    y: chartAreaY + 0.05,
+    w: 0.6,
+    h: 0.2,
+    fontSize: 8,
+    color: mutedColor,
+    fontFace: font,
   });
 
   // Native line chart
   const cd = generateDashboardChartData();
   // Sample every 4th label to avoid crowding
-  const sampledLabels = cd.labels.map((l, i) => i % 4 === 0 ? l : '');
+  const sampledLabels = cd.labels.map((l, i) => (i % 4 === 0 ? l : ''));
 
-  slide.addChart(pptx.ChartType.line, [
-    { name: 'Growth', labels: sampledLabels, values: cd.growthValues },
-    { name: 'Reach', labels: sampledLabels, values: cd.reachValues },
-  ], {
-    x: chartAreaX + 0.1,
-    y: chartAreaY + 0.35,
-    w: chartAreaW - 0.2,
-    h: chartAreaH - 0.45,
-    chartColors: [secondaryColor, primaryColor],
-    showLegend: false,
-    showTitle: false,
-    lineSmooth: true,
-    lineSize: 1.5,
-    valGridLine: { style: 'dash', color: isDark ? '334155' : 'F1F5F9' },
-    catGridLine: { style: 'none' },
-    catAxisLabelFontSize: 7,
-    valAxisLabelFontSize: 7,
-    catAxisLabelColor: mutedColor,
-    valAxisLabelColor: mutedColor,
-    catAxisLineShow: false,
-    valAxisLineShow: false,
-  });
+  slide.addChart(
+    pptx.ChartType.line,
+    [
+      { name: 'Growth', labels: sampledLabels, values: cd.growthValues },
+      { name: 'Reach', labels: sampledLabels, values: cd.reachValues },
+    ],
+    {
+      x: chartAreaX + 0.1,
+      y: chartAreaY + 0.35,
+      w: chartAreaW - 0.2,
+      h: chartAreaH - 0.45,
+      chartColors: [secondaryColor, primaryColor],
+      showLegend: false,
+      showTitle: false,
+      lineSmooth: true,
+      lineSize: 1.5,
+      valGridLine: { style: 'dash', color: isDark ? '334155' : 'F1F5F9' },
+      catGridLine: { style: 'none' },
+      catAxisLabelFontSize: 7,
+      valAxisLabelFontSize: 7,
+      catAxisLabelColor: mutedColor,
+      valAxisLabelColor: mutedColor,
+      catAxisLineShow: false,
+      valAxisLineShow: false,
+    },
+  );
 
   // === Native Insights ===
   const insightX = chartAreaX + chartAreaW + 0.12;
@@ -389,7 +938,10 @@ export function createDashboardSlideHybrid(
 
   // Insight card background
   slide.addShape(pptx.ShapeType.roundRect, {
-    x: insightX, y: chartAreaY, w: insightW, h: insightH,
+    x: insightX,
+    y: chartAreaY,
+    w: insightW,
+    h: insightH,
     fill: { color: isDark ? '1E293B' : 'FFFFFF' },
     line: { color: isDark ? '334155' : 'E2E8F0', width: 0.75 },
     rectRadius: 0.1,
@@ -397,14 +949,24 @@ export function createDashboardSlideHybrid(
 
   // Insight header
   slide.addText('KEY TAKEAWAYS', {
-    x: insightX + 0.15, y: chartAreaY + 0.05, w: insightW - 0.3, h: 0.25,
-    fontSize: 10, bold: true, color: textColor,
-    align: 'left', valign: 'middle', fontFace: font,
+    x: insightX + 0.15,
+    y: chartAreaY + 0.05,
+    w: insightW - 0.3,
+    h: 0.25,
+    fontSize: 10,
+    bold: true,
+    color: textColor,
+    align: 'left',
+    valign: 'middle',
+    fontFace: font,
   });
 
   // Separator line
   slide.addShape(pptx.ShapeType.line, {
-    x: insightX + 0.15, y: chartAreaY + 0.35, w: insightW - 0.3, h: 0,
+    x: insightX + 0.15,
+    y: chartAreaY + 0.35,
+    w: insightW - 0.3,
+    h: 0,
     line: { color: isDark ? '334155' : 'F1F5F9', width: 0.75 },
   });
 
@@ -418,9 +980,15 @@ export function createDashboardSlideHybrid(
   const takeawayText = takeawayLines.map((t) => `\u2022  ${cleanMd(t)}`).join('\n\n');
 
   slide.addText(takeawayText, {
-    x: insightX + 0.15, y: chartAreaY + 0.4, w: insightW - 0.3, h: insightH - 0.55,
-    fontSize: 9, color: mutedColor,
-    align: 'left', valign: 'top', fontFace: font,
+    x: insightX + 0.15,
+    y: chartAreaY + 0.4,
+    w: insightW - 0.3,
+    h: insightH - 0.55,
+    fontSize: 9,
+    color: mutedColor,
+    align: 'left',
+    valign: 'top',
+    fontFace: font,
     lineSpacingMultiple: 1.2,
     wrap: true,
   });
@@ -432,7 +1000,10 @@ export function createDashboardSlideHybrid(
 
   // Table card background
   slide.addShape(pptx.ShapeType.roundRect, {
-    x: 0.22, y: tableY, w: tableW, h: tableH,
+    x: 0.22,
+    y: tableY,
+    w: tableW,
+    h: tableH,
     fill: { color: isDark ? '1E293B' : 'FFFFFF' },
     line: { color: isDark ? '334155' : 'E2E8F0', width: 0.75 },
     rectRadius: 0.1,
@@ -440,20 +1011,39 @@ export function createDashboardSlideHybrid(
 
   // Build table from extracted DOM data or fallback
   const headerStyle = {
-    bold: true, fontSize: 7, color: mutedColor,
+    bold: true,
+    fontSize: 7,
+    color: mutedColor,
     fill: { color: isDark ? '0F172A' : 'F8FAFC' },
-    align: 'center' as const, valign: 'middle' as const, fontFace: font,
+    align: 'center' as const,
+    valign: 'middle' as const,
+    fontFace: font,
   };
   const cellStyle = {
-    fontSize: 7, color: textColor,
-    align: 'center' as const, valign: 'middle' as const, fontFace: font,
+    fontSize: 7,
+    color: textColor,
+    align: 'center' as const,
+    valign: 'middle' as const,
+    fontFace: font,
   };
   const cellBoldStyle = { ...cellStyle, bold: true };
   const gapGreenStyle = { ...cellBoldStyle, color: '10B981' };
   const gapRedStyle = { ...cellBoldStyle, color: 'F43F5E' };
 
-  const colHeaders = ['Month', 'Profile Reach', 'Profile Visit', 'Growth', 'Reach',
-    'Engagement', 'Likes', 'Comments', 'Shares', 'Saves', 'ER Reach', 'ER Follow'];
+  const colHeaders = [
+    'Month',
+    'Profile Reach',
+    'Profile Visit',
+    'Growth',
+    'Reach',
+    'Engagement',
+    'Likes',
+    'Comments',
+    'Shares',
+    'Saves',
+    'ER Reach',
+    'ER Follow',
+  ];
 
   // Use DOM-extracted data if available, otherwise fallback
   let tableRows: any[][];
@@ -461,26 +1051,85 @@ export function createDashboardSlideHybrid(
     const [prevRow, currRow, gapRow] = slideData.tableData;
     tableRows = [
       colHeaders.map((h) => ({ text: h, options: headerStyle })),
-      prevRow.map((v, i) => ({ text: v, options: i === 0 ? { ...cellStyle, align: 'left' as const } : cellStyle })),
-      currRow.map((v, i) => ({ text: v, options: i === 0 ? { ...cellBoldStyle, align: 'left' as const } : cellBoldStyle })),
+      prevRow.map((v, i) => ({
+        text: v,
+        options: i === 0 ? { ...cellStyle, align: 'left' as const } : cellStyle,
+      })),
+      currRow.map((v, i) => ({
+        text: v,
+        options: i === 0 ? { ...cellBoldStyle, align: 'left' as const } : cellBoldStyle,
+      })),
       gapRow.map((v, i) => {
-        if (i === 0) return { text: v, options: { ...cellBoldStyle, color: primaryColor, align: 'left' as const } };
+        if (i === 0)
+          return {
+            text: v,
+            options: { ...cellBoldStyle, color: primaryColor, align: 'left' as const },
+          };
         const isPositive = !v.startsWith('-');
         return { text: v, options: isPositive ? gapGreenStyle : gapRedStyle };
       }),
     ];
   } else {
     // Fallback with hardcoded data matching the component
-    const prevData = ['Previous', '50.9M', '480K', '28.1K', '14.1M', '118K', '82.4K', '10.8K', '22.3K', '2.5K', '2.07%', '0.08%'];
-    const currData = ['Current', '39M', '287K', '82.2K', '9.9M', '71.7K', '51.6K', '5.5K', '12.9K', '1.7K', '2.32%', '0.03%'];
-    const gapData = ['Gap', '-23.4%', '-40.2%', '+192.7%', '-29.6%', '-39.3%', '-37.4%', '-49.2%', '-42.1%', '-32.6%', '+12.1%', '-62.5%'];
+    const prevData = [
+      'Previous',
+      '50.9M',
+      '480K',
+      '28.1K',
+      '14.1M',
+      '118K',
+      '82.4K',
+      '10.8K',
+      '22.3K',
+      '2.5K',
+      '2.07%',
+      '0.08%',
+    ];
+    const currData = [
+      'Current',
+      '39M',
+      '287K',
+      '82.2K',
+      '9.9M',
+      '71.7K',
+      '51.6K',
+      '5.5K',
+      '12.9K',
+      '1.7K',
+      '2.32%',
+      '0.03%',
+    ];
+    const gapData = [
+      'Gap',
+      '-23.4%',
+      '-40.2%',
+      '+192.7%',
+      '-29.6%',
+      '-39.3%',
+      '-37.4%',
+      '-49.2%',
+      '-42.1%',
+      '-32.6%',
+      '+12.1%',
+      '-62.5%',
+    ];
 
     tableRows = [
       colHeaders.map((h) => ({ text: h, options: headerStyle })),
-      prevData.map((v, i) => ({ text: v, options: i === 0 ? { ...cellStyle, align: 'left' as const } : cellStyle })),
-      currData.map((v, i) => ({ text: v, options: i === 0 ? { ...cellBoldStyle, align: 'left' as const } : cellBoldStyle })),
+      prevData.map((v, i) => ({
+        text: v,
+        options: i === 0 ? { ...cellStyle, align: 'left' as const } : cellStyle,
+      })),
+      currData.map((v, i) => ({
+        text: v,
+        options: i === 0 ? { ...cellBoldStyle, align: 'left' as const } : cellBoldStyle,
+      })),
       gapData.map((v, i) => {
-        if (i === 0) return { text: v, options: { ...cellBoldStyle, color: primaryColor, align: 'left' as const } };
+        if (i === 0)
+          return {
+            text: v,
+            options: { ...cellBoldStyle, color: primaryColor, align: 'left' as const },
+          };
         const isPositive = v.startsWith('+');
         return { text: v, options: isPositive ? gapGreenStyle : gapRedStyle };
       }),
@@ -488,7 +1137,8 @@ export function createDashboardSlideHybrid(
   }
 
   slide.addTable(tableRows, {
-    x: 0.3, y: tableY + 0.05,
+    x: 0.3,
+    y: tableY + 0.05,
     w: tableW - 0.16,
     fontSize: 7,
     border: { pt: 0.5, color: isDark ? '334155' : 'E2E8F0' },
@@ -798,7 +1448,12 @@ interface LayoutDashboardExportData {
   title?: string;
   channel?: string;
   badgeImage?: string | null;
-  chartData?: { type: string; orientation?: string; labels: string[]; series: { name: string; values: number[] }[] };
+  chartData?: {
+    type: string;
+    orientation?: string;
+    labels: string[];
+    series: { name: string; values: number[] }[];
+  };
   insightText?: string;
   tableTitle?: string;
   tableHeaders?: string[];
@@ -809,7 +1464,11 @@ interface LayoutDashboardExportData {
 
 /** Channel short labels for PPTX badge */
 const CHANNEL_LABELS: Record<string, string> = {
-  instagram: 'IG', facebook: 'FB', twitter: 'X', tiktok: 'TT', youtube: 'YT',
+  instagram: 'IG',
+  facebook: 'FB',
+  twitter: 'X',
+  tiktok: 'TT',
+  youtube: 'YT',
 };
 
 /**
@@ -819,11 +1478,16 @@ const CHANNEL_LABELS: Record<string, string> = {
 function getChannelBadgeSvg(channel: string): string {
   // Lucide icon SVG paths (24x24 viewBox)
   const iconPaths: Record<string, string> = {
-    instagram: '<rect x="2" y="2" width="20" height="20" rx="5" ry="5" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
-    facebook: '<path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
-    twitter: '<path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
-    tiktok: '<path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
-    youtube: '<path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polygon points="10 15 15 12 10 9 10 15" fill="white"/>',
+    instagram:
+      '<rect x="2" y="2" width="20" height="20" rx="5" ry="5" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+    facebook:
+      '<path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+    twitter:
+      '<path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+    tiktok:
+      '<path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+    youtube:
+      '<path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polygon points="10 15 15 12 10 9 10 15" fill="white"/>',
   };
 
   const iconPath = iconPaths[channel] || '';
@@ -840,7 +1504,9 @@ function getChannelBadgeSvg(channel: string): string {
 /**
  * Extract chart data from DOM SVG (Recharts renders data in SVG elements).
  */
-export function extractChartInfo(chartEl: HTMLElement): LayoutDashboardExportData['chartData'] | null {
+export function extractChartInfo(
+  chartEl: HTMLElement,
+): LayoutDashboardExportData['chartData'] | null {
   // Primary: read from data-chart-json attribute (exact data from React component)
   const jsonEl = chartEl.querySelector('[data-chart-json]') as HTMLElement;
   if (jsonEl) {
@@ -889,11 +1555,12 @@ export function extractChartInfo(chartEl: HTMLElement): LayoutDashboardExportDat
 
   return {
     type: hasBar ? 'bar' : 'line',
-    labels: xLabels.length > 0 ? xLabels : Array.from({ length: numLabels }, (_, i) => String(i + 1)),
+    labels:
+      xLabels.length > 0 ? xLabels : Array.from({ length: numLabels }, (_, i) => String(i + 1)),
     series: (seriesNames.length > 0 ? seriesNames : ['Series 1']).map((name, sIdx) => ({
       name,
       values: Array.from({ length: numLabels }, (_, i) =>
-        Math.floor(maxY * 0.3 + (maxY * 0.5 * ((i * 37 + sIdx * 13) % 100)) / 100)
+        Math.floor(maxY * 0.3 + (maxY * 0.5 * ((i * 37 + sIdx * 13) % 100)) / 100),
       ),
     })),
   };
@@ -916,13 +1583,19 @@ function drawNativeFooter(
 
   // Footer accent line
   slide.addShape(pptx.ShapeType.line, {
-    x: 0.3, y: footerY, w: 9.4, h: 0,
+    x: 0.3,
+    y: footerY,
+    w: 9.4,
+    h: 0,
     line: { color: primaryColor, width: 1 },
   });
 
   // Footer background
   slide.addShape(pptx.ShapeType.rect, {
-    x: 0, y: footerY, w: 10, h: footerH,
+    x: 0,
+    y: footerY,
+    w: 10,
+    h: footerH,
     fill: { color: 'FFFFFF', transparency: 5 },
     line: { type: 'none' },
   });
@@ -931,7 +1604,10 @@ function drawNativeFooter(
   if (config.coverDesign?.logoData) {
     slide.addImage({
       data: config.coverDesign.logoData,
-      x: 0.3, y: footerY + 0.06, w: 0.35, h: 0.35,
+      x: 0.3,
+      y: footerY + 0.06,
+      w: 0.35,
+      h: 0.35,
       sizing: { type: 'contain', w: 0.35, h: 0.35 },
     });
   }
@@ -939,113 +1615,114 @@ function drawNativeFooter(
   // Client name + period
   const logoOffset = config.coverDesign?.logoData ? 0.72 : 0.3;
   slide.addText(`${config.clientName}  \u2022  ${config.period}`, {
-    x: logoOffset, y: footerY + 0.04, w: 3.5, h: 0.38,
-    fontSize: 8, color: '374151', fontFace: font,
-    align: 'left', valign: 'middle',
+    x: logoOffset,
+    y: footerY + 0.04,
+    w: 3.5,
+    h: 0.38,
+    fontSize: 8,
+    color: '374151',
+    fontFace: font,
+    align: 'left',
+    valign: 'middle',
   });
 
   // Powered by Sekata
   slide.addText('Powered by Sekata', {
-    x: 3.5, y: footerY + 0.04, w: 3, h: 0.38,
-    fontSize: 7, color: '9CA3AF', fontFace: font,
-    align: 'center', valign: 'middle',
+    x: 3.5,
+    y: footerY + 0.04,
+    w: 3,
+    h: 0.38,
+    fontSize: 7,
+    color: '9CA3AF',
+    fontFace: font,
+    align: 'center',
+    valign: 'middle',
   });
 
   // Page number
   slide.addText(`${currentPage} / ${totalPages}`, {
-    x: 8, y: footerY + 0.04, w: 1.5, h: 0.38,
-    fontSize: 8, bold: true, color: primaryColor, fontFace: font,
-    align: 'right', valign: 'middle',
+    x: 8,
+    y: footerY + 0.04,
+    w: 1.5,
+    h: 0.38,
+    fontSize: 8,
+    bold: true,
+    color: primaryColor,
+    fontFace: font,
+    align: 'right',
+    valign: 'middle',
   });
 }
 
+// ─── Layout Dashboard Native Export ──────────────────────────
+
 /**
- * Create a layout dashboard slide: screenshot bg + native header, chart, table, insights, footer.
+ * Create a layout_dashboard slide using fully native PPTX elements.
+ * No screenshot background – draws background/decorations the same way as KPI/Overview.
  */
-export function createLayoutDashboardHybrid(
+export function createLayoutDashboardNative(
   pptx: PptxGenJS,
   config: ReportConfig,
-  bgImageData: string,
   exportData: LayoutDashboardExportData,
 ) {
   const slide = pptx.addSlide();
-  const font = config.font?.name || 'Inter';
-  const isDark = (config.coverDesign?.contentMode || 'light') === 'dark';
-  const textColor = isDark ? 'FFFFFF' : '1E293B';
-  const mutedColor = isDark ? 'CBD5E1' : '64748B';
-  const primaryColor = cleanColor(config.coverDesign?.colors?.primary || config.theme?.brandColor || '#3B82F6');
-  const secondaryColor = cleanColor(config.coverDesign?.colors?.secondary || '#10B981');
-  const accentColor = cleanColor(config.coverDesign?.colors?.accent || '#8B5CF6');
-  const cardBg = isDark ? '1E293B' : 'FFFFFF';
-  const borderColor = isDark ? '334155' : 'E2E8F0';
+  const tv = getSlideThemeVars(config);
 
-  // Screenshot background (only page bg + decorative elements)
-  slide.addImage({
-    data: bgImageData,
-    x: 0, y: 0, w: '100%', h: '100%',
-  });
+  // Shared background + decorations + header (same as KPI/Overview)
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  const { headerH, headerY } = drawSlideHeader(
+    slide,
+    pptx,
+    tv,
+    exportData.title || 'Dashboard',
+    exportData.channel,
+  );
 
-  // === Native Header ===
-  const headerX = 0.3;
-  const headerY = 0.3;
-  const headerW = 9.4;
-  const headerH = 0.6;
+  const font = tv.font;
+  const isDark = tv.isDark;
+  const mutedColor = tv.mutedColor;
+  const cardBg = tv.cardBg;
+  const borderColor = tv.borderColor;
 
-  // Header card bg
-  slide.addShape(pptx.ShapeType.roundRect, {
-    x: headerX, y: headerY, w: headerW, h: headerH,
-    fill: { color: cardBg },
-    line: { color: borderColor, width: 0.75 },
-    rectRadius: 0.08,
-  });
-
-  // Header left accent bar
-  slide.addShape(pptx.ShapeType.rect, {
-    x: headerX, y: headerY, w: 0.04, h: headerH,
-    fill: { color: primaryColor },
-    line: { type: 'none' },
-  });
-
-  // Title text (editable, slightly bigger)
-  slide.addText(exportData.title || 'Dashboard', {
-    x: headerX + 0.2, y: headerY + 0.05, w: 6, h: headerH - 0.1,
-    fontSize: 18, bold: true, color: textColor,
-    align: 'left', valign: 'middle', fontFace: font,
-  });
-
-  // Channel badge (SVG icon)
-  if (exportData.channel) {
-    const badgeSvg = getChannelBadgeSvg(exportData.channel);
-    if (badgeSvg) {
-      slide.addImage({
-        data: badgeSvg,
-        x: headerX + headerW - 0.55, y: headerY + 0.08, w: 0.44, h: 0.44,
-      });
-    }
-  }
-
+  // Layout dimensions
   const contentY = headerY + headerH + 0.15;
   const chartX = 0.3;
   const chartW = 5.7;
   const chartH = 2.3;
+  const insightX = chartX + chartW + 0.15;
+  const insightW = 10 - insightX - 0.3;
+  const tableY = contentY + chartH + 0.15;
+  const tblFooterY = 5.15;
+  const tableH = tblFooterY - tableY - 0.08;
+  const tableW = 9.4;
 
-  // === Native Chart (editable) ===
-  // Chart card bg (opaque, covers hidden screenshot area)
+  // === Chart Card ===
   slide.addShape(pptx.ShapeType.roundRect, {
-    x: chartX, y: contentY, w: chartW, h: chartH,
+    x: chartX,
+    y: contentY,
+    w: chartW,
+    h: chartH,
     fill: { color: cardBg },
     line: { color: borderColor, width: 0.75 },
     rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
   });
 
   const cd = exportData.chartData;
   if (cd && cd.series.length > 0) {
-    // Use same color palette as SmartChartBlock metricColors
-    const chartColors = ['3B82F6', '10B981', 'F59E0B', 'EF4444', '8B5CF6', 'EC4899', '06B6D4', 'F97316'];
+    const chartColors = [
+      '3B82F6',
+      '10B981',
+      'F59E0B',
+      'EF4444',
+      '8B5CF6',
+      'EC4899',
+      '06B6D4',
+      'F97316',
+    ];
     const isBar = cd.type === 'bar';
-    // Recharts: barOrientation 'vertical' = vertical bars (normal), default/horizontal = horizontal bars (layout=vertical)
     const isHorizontalBar = isBar && cd.orientation !== 'vertical';
-
     const chartSeries = cd.series.map((s) => ({
       name: s.name,
       labels: cd.labels,
@@ -1053,7 +1730,6 @@ export function createLayoutDashboardHybrid(
     }));
 
     if (cd.type === 'pie') {
-      // Pie chart
       slide.addChart(pptx.ChartType.pie, chartSeries, {
         x: chartX + 0.1,
         y: contentY + 0.1,
@@ -1064,9 +1740,8 @@ export function createLayoutDashboardHybrid(
         legendPos: 'r',
         legendFontSize: 7,
         showTitle: false,
-        dataLabelPosition: 'outEnd',
-        dataLabelFontSize: 7,
         showPercent: true,
+        dataLabelFontSize: 7,
       });
     } else if (isBar) {
       slide.addChart(pptx.ChartType.bar, chartSeries, {
@@ -1093,7 +1768,6 @@ export function createLayoutDashboardHybrid(
         valAxisLineShow: false,
       });
     } else {
-      // Line chart
       slide.addChart(pptx.ChartType.line, chartSeries, {
         x: chartX + 0.1,
         y: contentY + 0.1,
@@ -1119,99 +1793,78 @@ export function createLayoutDashboardHybrid(
     }
   } else {
     slide.addText('Chart Area', {
-      x: chartX, y: contentY, w: chartW, h: chartH,
-      fontSize: 12, bold: true, color: mutedColor,
-      align: 'center', valign: 'middle', fontFace: font,
+      x: chartX,
+      y: contentY,
+      w: chartW,
+      h: chartH,
+      fontSize: 12,
+      color: mutedColor,
+      align: 'center',
+      valign: 'middle',
+      fontFace: font,
     });
   }
 
-  // === Native Insight (editable) ===
-  const insightX = chartX + chartW + 0.15;
-  const insightW = 10 - insightX - 0.3;
-
-  // Large opaque cover to fully hide any dashed border artifacts from screenshot
-  const pageBg = isDark ? '0F172A' : 'F8FAFC';
-  slide.addShape(pptx.ShapeType.rect, {
-    x: insightX - 0.15, y: contentY - 0.15, w: insightW + 0.45, h: chartH + 0.3,
-    fill: { color: pageBg },
-    line: { type: 'none' },
+  // === Insight Panel ===
+  drawSlideInsight(slide, pptx, tv, {
+    x: insightX,
+    y: contentY,
+    w: insightW,
+    h: chartH,
+    label: 'AI Key Insights',
+    text: exportData.insightText || '',
   });
-  // Insight card with border
+
+  // === Table Card ===
   slide.addShape(pptx.ShapeType.roundRect, {
-    x: insightX, y: contentY, w: insightW, h: chartH,
+    x: 0.3,
+    y: tableY,
+    w: tableW,
+    h: tableH,
     fill: { color: cardBg },
     line: { color: borderColor, width: 0.75 },
     rectRadius: 0.08,
-  });
-
-  slide.addText('AI KEY INSIGHTS', {
-    x: insightX + 0.15, y: contentY + 0.1, w: insightW - 0.3, h: 0.22,
-    fontSize: 9, bold: true, color: mutedColor, fontFace: font,
-    align: 'left', valign: 'middle',
-  });
-
-  // Separator line
-  slide.addShape(pptx.ShapeType.line, {
-    x: insightX + 0.15, y: contentY + 0.38, w: insightW - 0.3, h: 0,
-    line: { color: borderColor, width: 0.5 },
-  });
-
-  const insightContent = exportData.insightText || '';
-  if (insightContent) {
-    slide.addText(insightContent, {
-      x: insightX + 0.15, y: contentY + 0.45, w: insightW - 0.3, h: chartH - 0.6,
-      fontSize: 9, color: isDark ? 'CBD5E1' : '475569',
-      align: 'left', valign: 'top', fontFace: font,
-      lineSpacingMultiple: 1.3, wrap: true,
-    });
-  } else {
-    slide.addText('AI Key Insights', {
-      x: insightX, y: contentY, w: insightW, h: chartH,
-      fontSize: 12, color: mutedColor,
-      align: 'center', valign: 'middle', fontFace: font,
-    });
-  }
-
-  // === Native Table ===
-  const tableY = contentY + chartH + 0.15;
-  const tblFooterY = 5.15;
-  const tableH = tblFooterY - tableY - 0.08;
-  const tableW = 9.4;
-
-  // Table card bg
-  slide.addShape(pptx.ShapeType.roundRect, {
-    x: 0.3, y: tableY, w: tableW, h: tableH,
-    fill: { color: cardBg },
-    line: { color: borderColor, width: 0.75 },
-    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
   });
 
   if (exportData.tableHeaders && exportData.tableRows && exportData.tableRows.length > 0) {
-    // Table title (e.g. "PERFORMANCE OVERVIEW")
     if (exportData.tableTitle) {
       slide.addText(exportData.tableTitle, {
-        x: 0.45, y: tableY + 0.05, w: tableW - 0.3, h: 0.25,
-        fontSize: 9, bold: true, color: textColor,
-        align: 'left', valign: 'middle', fontFace: font,
+        x: 0.45,
+        y: tableY + 0.05,
+        w: tableW - 0.3,
+        h: 0.25,
+        fontSize: 9,
+        bold: true,
+        color: tv.textColor,
+        align: 'left',
+        valign: 'middle',
+        fontFace: font,
       });
     }
 
     const headerStyle = {
-      bold: true, fontSize: 7, color: mutedColor,
+      bold: true,
+      fontSize: 7,
+      color: mutedColor,
       fill: { color: isDark ? '0F172A' : 'F8FAFC' },
-      align: 'center' as const, valign: 'middle' as const, fontFace: font,
+      align: 'center' as const,
+      valign: 'middle' as const,
+      fontFace: font,
     };
     const cellStyle = {
-      fontSize: 7, color: textColor,
-      align: 'center' as const, valign: 'middle' as const, fontFace: font,
+      fontSize: 7,
+      color: tv.textColor,
+      align: 'center' as const,
+      valign: 'middle' as const,
+      fontFace: font,
     };
     const cellBoldStyle = { ...cellStyle, bold: true };
+    const numDataRows = exportData.tableRows.length;
 
     const tableRows: any[][] = [
       exportData.tableHeaders.map((h) => ({ text: h, options: headerStyle })),
     ];
-
-    const numDataRows = exportData.tableRows.length;
     exportData.tableRows.forEach((row, rowIdx) => {
       const isLastRow = rowIdx === numDataRows - 1;
       tableRows.push(
@@ -1225,7 +1878,12 @@ export function createLayoutDashboardHybrid(
           }
           return {
             text: v,
-            options: i === 0 ? { ...cellBoldStyle, align: 'left' as const } : (isLastRow ? cellBoldStyle : cellStyle),
+            options:
+              i === 0
+                ? { ...cellBoldStyle, align: 'left' as const }
+                : isLastRow
+                  ? cellBoldStyle
+                  : cellStyle,
           };
         }),
       );
@@ -1236,25 +1894,41 @@ export function createLayoutDashboardHybrid(
     const rowH = Math.min(0.3, availH / tableRows.length);
 
     slide.addTable(tableRows, {
-      x: 0.35, y: tblYStart,
+      x: 0.35,
+      y: tblYStart,
       w: tableW - 0.1,
       fontSize: 7,
       border: { pt: 0.5, color: borderColor },
-      align: 'center', valign: 'middle',
-      fontFace: font, color: textColor,
+      align: 'center',
+      valign: 'middle',
+      fontFace: font,
+      color: tv.textColor,
       rowH: tableRows.map(() => rowH),
     });
   } else {
     slide.addText('Data Table', {
-      x: 0.3, y: tableY, w: tableW, h: tableH,
-      fontSize: 12, color: mutedColor,
-      align: 'center', valign: 'middle', fontFace: font,
+      x: 0.3,
+      y: tableY,
+      w: tableW,
+      h: tableH,
+      fontSize: 12,
+      color: mutedColor,
+      align: 'center',
+      valign: 'middle',
+      fontFace: font,
     });
   }
 
-  // === Native Footer ===
-  drawNativeFooter(slide, pptx, config, primaryColor, font,
-    exportData.currentPage || 1, exportData.totalPages || 1);
+  // === Footer ===
+  drawNativeFooter(
+    slide,
+    pptx,
+    config,
+    tv.primaryColor,
+    font,
+    exportData.currentPage || 1,
+    exportData.totalPages || 1,
+  );
 }
 
 // ─── Comparison Hybrid Export ─────────────────────────────────
@@ -1262,8 +1936,18 @@ export function createLayoutDashboardHybrid(
 interface ComparisonExportData {
   title?: string;
   channel?: string;
-  chartAData?: { type: string; orientation?: string; labels: string[]; series: { name: string; values: number[] }[] } | null;
-  chartBData?: { type: string; orientation?: string; labels: string[]; series: { name: string; values: number[] }[] } | null;
+  chartAData?: {
+    type: string;
+    orientation?: string;
+    labels: string[];
+    series: { name: string; values: number[] }[];
+  } | null;
+  chartBData?: {
+    type: string;
+    orientation?: string;
+    labels: string[];
+    series: { name: string; values: number[] }[];
+  } | null;
   insightText?: string;
   currentPage?: number;
   totalPages?: number;
@@ -1275,62 +1959,27 @@ interface ComparisonExportData {
 export function createComparisonHybrid(
   pptx: PptxGenJS,
   config: ReportConfig,
-  bgImageData: string,
+  _bgImageData: string,
   exportData: ComparisonExportData,
 ) {
   const slide = pptx.addSlide();
-  const font = config.font?.name || 'Inter';
-  const isDark = (config.coverDesign?.contentMode || 'light') === 'dark';
-  const textColor = isDark ? 'FFFFFF' : '1E293B';
-  const mutedColor = isDark ? 'CBD5E1' : '64748B';
-  const primaryColor = cleanColor(config.coverDesign?.colors?.primary || config.theme?.brandColor || '#3B82F6');
-  const cardBg = isDark ? '1E293B' : 'FFFFFF';
-  const borderColor = isDark ? '334155' : 'E2E8F0';
-  const pageBg = isDark ? '0F172A' : 'F8FAFC';
+  const tv = getSlideThemeVars(config);
 
-  // Screenshot background (page bg + decoratives only)
-  slide.addImage({
-    data: bgImageData,
-    x: 0, y: 0, w: '100%', h: '100%',
-  });
+  // Fully native background + decorations + header (no screenshot)
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(slide, pptx, tv, exportData.title || 'Comparison', exportData.channel);
 
-  // === Native Header ===
-  const headerX = 0.3;
+  const font = tv.font;
+  const isDark = tv.isDark;
+  const textColor = tv.textColor;
+  const mutedColor = tv.mutedColor;
+  const primaryColor = tv.primaryColor;
+  const cardBg = tv.cardBg;
+  const borderColor = tv.borderColor;
+  const pageBg = tv.pageBg;
   const headerY = 0.3;
-  const headerW = 9.4;
   const headerH = 0.55;
-
-  slide.addShape(pptx.ShapeType.roundRect, {
-    x: headerX, y: headerY, w: headerW, h: headerH,
-    fill: { color: cardBg },
-    line: { color: borderColor, width: 0.75 },
-    rectRadius: 0.08,
-  });
-
-  // Header left accent bar
-  slide.addShape(pptx.ShapeType.rect, {
-    x: headerX, y: headerY, w: 0.04, h: headerH,
-    fill: { color: primaryColor },
-    line: { type: 'none' },
-  });
-
-  // Title
-  slide.addText(exportData.title || 'Comparison', {
-    x: headerX + 0.2, y: headerY + 0.03, w: 6, h: headerH - 0.06,
-    fontSize: 18, bold: true, color: textColor,
-    align: 'left', valign: 'middle', fontFace: font,
-  });
-
-  // Channel badge
-  if (exportData.channel) {
-    const badgeSvg = getChannelBadgeSvg(exportData.channel);
-    if (badgeSvg) {
-      slide.addImage({
-        data: badgeSvg,
-        x: headerX + headerW - 0.5, y: headerY + 0.06, w: 0.42, h: 0.42,
-      });
-    }
-  }
 
   // === Two Chart Columns ===
   const contentY = headerY + headerH + 0.15;
@@ -1348,14 +1997,26 @@ export function createComparisonHybrid(
   ) => {
     // Card bg
     slide.addShape(pptx.ShapeType.roundRect, {
-      x, y: contentY, w: chartW, h: chartH,
+      x,
+      y: contentY,
+      w: chartW,
+      h: chartH,
       fill: { color: cardBg },
       line: { color: borderColor, width: 0.75 },
       rectRadius: 0.08,
     });
 
     if (chartData && chartData.series.length > 0) {
-      const chartColors = ['3B82F6', '10B981', 'F59E0B', 'EF4444', '8B5CF6', 'EC4899', '06B6D4', 'F97316'];
+      const chartColors = [
+        '3B82F6',
+        '10B981',
+        'F59E0B',
+        'EF4444',
+        '8B5CF6',
+        'EC4899',
+        '06B6D4',
+        'F97316',
+      ];
       const isBar = chartData.type === 'bar';
       const isHorizontalBar = isBar && chartData.orientation !== 'vertical';
 
@@ -1367,44 +2028,77 @@ export function createComparisonHybrid(
 
       if (chartData.type === 'pie') {
         slide.addChart(pptx.ChartType.pie, chartSeries, {
-          x: x + 0.1, y: contentY + 0.1, w: chartW - 0.2, h: chartH - 0.2,
+          x: x + 0.1,
+          y: contentY + 0.1,
+          w: chartW - 0.2,
+          h: chartH - 0.2,
           chartColors: chartColors.slice(0, chartData.labels.length),
-          showLegend: true, legendPos: 'b', legendFontSize: 6,
-          showTitle: false, showPercent: true, dataLabelFontSize: 6,
+          showLegend: true,
+          legendPos: 'b',
+          legendFontSize: 6,
+          showTitle: false,
+          showPercent: true,
+          dataLabelFontSize: 6,
         });
       } else if (isBar) {
         slide.addChart(pptx.ChartType.bar, chartSeries, {
-          x: x + 0.1, y: contentY + 0.1, w: chartW - 0.2, h: chartH - 0.2,
+          x: x + 0.1,
+          y: contentY + 0.1,
+          w: chartW - 0.2,
+          h: chartH - 0.2,
           chartColors: chartColors.slice(0, chartData.series.length),
           barDir: isHorizontalBar ? 'bar' : 'col',
-          barGrouping: 'clustered', barGapWidthPct: 80,
-          showLegend: true, legendPos: 't', legendFontSize: 6,
-          showTitle: false, showValue: false,
+          barGrouping: 'clustered',
+          barGapWidthPct: 80,
+          showLegend: true,
+          legendPos: 't',
+          legendFontSize: 6,
+          showTitle: false,
+          showValue: false,
           valGridLine: { style: 'dash', color: isDark ? '334155' : 'E2E8F0' },
           catGridLine: { style: 'none' },
-          catAxisLabelFontSize: 6, valAxisLabelFontSize: 6,
-          catAxisLabelColor: mutedColor, valAxisLabelColor: mutedColor,
-          catAxisLineShow: false, valAxisLineShow: false,
+          catAxisLabelFontSize: 6,
+          valAxisLabelFontSize: 6,
+          catAxisLabelColor: mutedColor,
+          valAxisLabelColor: mutedColor,
+          catAxisLineShow: false,
+          valAxisLineShow: false,
         });
       } else {
         slide.addChart(pptx.ChartType.line, chartSeries, {
-          x: x + 0.1, y: contentY + 0.1, w: chartW - 0.2, h: chartH - 0.2,
+          x: x + 0.1,
+          y: contentY + 0.1,
+          w: chartW - 0.2,
+          h: chartH - 0.2,
           chartColors: chartColors.slice(0, chartData.series.length),
-          showLegend: true, legendPos: 't', legendFontSize: 6,
-          showTitle: false, lineSmooth: true, lineSize: 2,
+          showLegend: true,
+          legendPos: 't',
+          legendFontSize: 6,
+          showTitle: false,
+          lineSmooth: true,
+          lineSize: 2,
           lineDataSymbolSize: chartData.labels.length > 10 ? 3 : 5,
           valGridLine: { style: 'dash', color: isDark ? '334155' : 'E2E8F0' },
           catGridLine: { style: 'none' },
-          catAxisLabelFontSize: 6, valAxisLabelFontSize: 6,
-          catAxisLabelColor: mutedColor, valAxisLabelColor: mutedColor,
-          catAxisLineShow: false, valAxisLineShow: false,
+          catAxisLabelFontSize: 6,
+          valAxisLabelFontSize: 6,
+          catAxisLabelColor: mutedColor,
+          valAxisLabelColor: mutedColor,
+          catAxisLineShow: false,
+          valAxisLineShow: false,
         });
       }
     } else {
       slide.addText(fallbackLabel, {
-        x, y: contentY, w: chartW, h: chartH,
-        fontSize: 11, color: mutedColor,
-        align: 'center', valign: 'middle', fontFace: font,
+        x,
+        y: contentY,
+        w: chartW,
+        h: chartH,
+        fontSize: 11,
+        color: mutedColor,
+        align: 'center',
+        valign: 'middle',
+        fontFace: font,
       });
     }
   };
@@ -1416,248 +2110,801 @@ export function createComparisonHybrid(
   const insightY = contentY + chartH + 0.15;
   const footerY = 5.15;
   const insightH = footerY - insightY - 0.08;
-  const insightW = 9.4;
 
-  // Cover any screenshot artifacts
-  slide.addShape(pptx.ShapeType.rect, {
-    x: 0.15, y: insightY - 0.1, w: insightW + 0.3, h: insightH + 0.2,
-    fill: { color: pageBg },
-    line: { type: 'none' },
+  drawSlideInsight(slide, pptx, tv, {
+    x: 0.3,
+    y: insightY,
+    w: 9.4,
+    h: insightH,
+    label: 'Comparative Analysis & Notes',
+    text: exportData.insightText || '',
   });
 
-  // Insight card
+  // === Native Footer ===
+  drawNativeFooter(
+    slide,
+    pptx,
+    config,
+    primaryColor,
+    font,
+    exportData.currentPage || 1,
+    exportData.totalPages || 1,
+  );
+}
+
+// ─── KPI Hybrid Export ─────────────────────────────────────────
+
+interface KPIExportData {
+  title?: string;
+  channel?: string;
+  metrics?: Array<{
+    label: string;
+    value: string;
+    trend: 'up' | 'down';
+    trendValue: string;
+    iconId?: string;
+  }>;
+  chartData?: {
+    type: string;
+    orientation?: string;
+    labels: string[];
+    series: { name: string; values: number[] }[];
+  } | null;
+  insightText?: string;
+  currentPage?: number;
+  totalPages?: number;
+}
+
+/**
+ * Create a KPI slide: All native elements with background from theme.
+ * All elements are rendered as native editable PowerPoint objects.
+ */
+export function createKPINative(pptx: PptxGenJS, config: ReportConfig, exportData: KPIExportData) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+
+  // Shared background + decorations + header
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(slide, pptx, tv, exportData.title || 'KPI Overview', exportData.channel);
+
+  // Keep local aliases for code below that still uses them
+  const font = tv.font;
+  const isDark = tv.isDark;
+  const textColor = tv.textColor;
+  const mutedColor = tv.mutedColor;
+  const primaryColor = tv.primaryColor;
+  const cardBg = tv.cardBg;
+  const borderColor = tv.borderColor;
+
+  // === Native Metric Scorecards ===
+  const metrics = exportData.metrics || [];
+  const metricCount = metrics.length || 4;
+  const metricsY = 0.95;
+  const metricsH = 1.1;
+  const metricsW = 9.4;
+  const metricCardW = (metricsW - (metricCount - 1) * 0.15) / metricCount;
+
+  metrics.forEach((metric, idx) => {
+    const cardX = 0.3 + idx * (metricCardW + 0.15);
+
+    // Metric card bg
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: cardX,
+      y: metricsY,
+      w: metricCardW,
+      h: metricsH,
+      fill: { color: cardBg },
+      line: { color: borderColor, width: 0.75 },
+      rectRadius: 0.08,
+      shadow: {
+        type: 'outer',
+        blur: 4,
+        offset: 1,
+        angle: 90,
+        color: '000000',
+        opacity: 0.05,
+      },
+    });
+
+    // Metric label
+    slide.addText(metric.label.toUpperCase(), {
+      x: cardX + 0.1,
+      y: metricsY + 0.12,
+      w: metricCardW - 0.2,
+      h: 0.2,
+      fontSize: 8,
+      bold: true,
+      color: mutedColor,
+      align: 'left',
+      valign: 'top',
+      fontFace: font,
+    });
+
+    // Metric value
+    slide.addText(metric.value, {
+      x: cardX + 0.1,
+      y: metricsY + 0.38,
+      w: metricCardW - 0.2,
+      h: 0.4,
+      fontSize: 24,
+      bold: true,
+      color: textColor,
+      align: 'left',
+      valign: 'middle',
+      fontFace: font,
+    });
+
+    // Trend badge
+    const trendColor = metric.trend === 'up' ? '10B981' : 'EF4444';
+    const trendBg = metric.trend === 'up' ? 'D1FAE5' : 'FEE2E2';
+    const trendArrow = metric.trend === 'up' ? '↑ ' : '↓ ';
+
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: cardX + 0.1,
+      y: metricsY + 0.82,
+      w: 0.75,
+      h: 0.18,
+      fill: { color: isDark ? trendColor : trendBg, transparency: isDark ? 85 : 0 },
+      line: { type: 'none' },
+      rectRadius: 0.08,
+    });
+
+    slide.addText(trendArrow + metric.trendValue, {
+      x: cardX + 0.1,
+      y: metricsY + 0.82,
+      w: 0.75,
+      h: 0.18,
+      fontSize: 8,
+      bold: true,
+      color: trendColor,
+      align: 'center',
+      valign: 'middle',
+      fontFace: font,
+    });
+
+    // Caption
+    slide.addText('vs last period', {
+      x: cardX + 0.88,
+      y: metricsY + 0.82,
+      w: metricCardW - 0.98,
+      h: 0.18,
+      fontSize: 7,
+      color: mutedColor,
+      align: 'left',
+      valign: 'middle',
+      fontFace: font,
+    });
+  });
+
+  // === Chart + Insight Row ===
+  // Chart + insight row starts below metrics
+  const contentY = 2.15;
+  const footerY = 5.15;
+  const contentH = footerY - contentY - 0.08;
+
+  // Chart area (flex-[2] = 2/3 width)
+  const chartX = 0.3;
+  const chartW = 6.1;
+  const insightX = chartX + chartW + 0.15;
+  const insightW = 9.7 - insightX;
+
+  // Chart card bg (opaque cover)
   slide.addShape(pptx.ShapeType.roundRect, {
-    x: 0.3, y: insightY, w: insightW, h: insightH,
+    x: chartX,
+    y: contentY,
+    w: chartW,
+    h: contentH,
     fill: { color: cardBg },
     line: { color: borderColor, width: 0.75 },
     rectRadius: 0.08,
   });
 
-  slide.addText('COMPARATIVE ANALYSIS & NOTES', {
-    x: 0.45, y: insightY + 0.08, w: insightW - 0.3, h: 0.2,
-    fontSize: 8, bold: true, color: mutedColor, fontFace: font,
-    align: 'left', valign: 'middle',
-  });
+  const cd = exportData.chartData;
+  if (cd && cd.series.length > 0) {
+    const chartColors = [
+      '3B82F6',
+      '10B981',
+      'F59E0B',
+      'EF4444',
+      '8B5CF6',
+      'EC4899',
+      '06B6D4',
+      'F97316',
+    ];
+    const isBar = cd.type === 'bar';
+    const isHorizontalBar = isBar && cd.orientation !== 'vertical';
 
-  slide.addShape(pptx.ShapeType.line, {
-    x: 0.45, y: insightY + 0.32, w: insightW - 0.3, h: 0,
-    line: { color: borderColor, width: 0.5 },
-  });
+    const chartSeries = cd.series.map((s) => ({
+      name: s.name,
+      labels: cd.labels,
+      values: s.values,
+    }));
 
-  const insightContent = exportData.insightText || '';
-  if (insightContent) {
-    slide.addText(insightContent, {
-      x: 0.45, y: insightY + 0.38, w: insightW - 0.3, h: insightH - 0.5,
-      fontSize: 9, color: isDark ? 'CBD5E1' : '475569',
-      align: 'left', valign: 'top', fontFace: font,
-      lineSpacingMultiple: 1.3, wrap: true,
-    });
+    if (cd.type === 'pie') {
+      slide.addChart(pptx.ChartType.pie, chartSeries, {
+        x: chartX + 0.1,
+        y: contentY + 0.1,
+        w: chartW - 0.2,
+        h: contentH - 0.2,
+        chartColors: chartColors.slice(0, cd.labels.length),
+        showLegend: true,
+        legendPos: 'r',
+        legendFontSize: 7,
+        showTitle: false,
+        showPercent: true,
+        dataLabelFontSize: 7,
+      });
+    } else if (isBar) {
+      slide.addChart(pptx.ChartType.bar, chartSeries, {
+        x: chartX + 0.1,
+        y: contentY + 0.1,
+        w: chartW - 0.2,
+        h: contentH - 0.2,
+        chartColors: chartColors.slice(0, cd.series.length),
+        barDir: isHorizontalBar ? 'bar' : 'col',
+        barGrouping: 'clustered',
+        barGapWidthPct: 80,
+        showLegend: true,
+        legendPos: 't',
+        legendFontSize: 7,
+        showTitle: false,
+        showValue: false,
+        valGridLine: { style: 'dash', color: isDark ? '334155' : 'E2E8F0' },
+        catGridLine: { style: 'none' },
+        catAxisLabelFontSize: 7,
+        valAxisLabelFontSize: 7,
+        catAxisLabelColor: mutedColor,
+        valAxisLabelColor: mutedColor,
+        catAxisLineShow: false,
+        valAxisLineShow: false,
+      });
+    } else {
+      slide.addChart(pptx.ChartType.line, chartSeries, {
+        x: chartX + 0.1,
+        y: contentY + 0.1,
+        w: chartW - 0.2,
+        h: contentH - 0.2,
+        chartColors: chartColors.slice(0, cd.series.length),
+        showLegend: true,
+        legendPos: 't',
+        legendFontSize: 7,
+        showTitle: false,
+        lineSmooth: true,
+        lineSize: 2,
+        lineDataSymbolSize: cd.labels.length > 10 ? 4 : 6,
+        valGridLine: { style: 'dash', color: isDark ? '334155' : 'E2E8F0' },
+        catGridLine: { style: 'none' },
+        catAxisLabelFontSize: 7,
+        valAxisLabelFontSize: 7,
+        catAxisLabelColor: mutedColor,
+        valAxisLabelColor: mutedColor,
+        catAxisLineShow: false,
+        valAxisLineShow: false,
+      });
+    }
   } else {
-    slide.addText('Comparative Analysis & Notes', {
-      x: 0.3, y: insightY, w: insightW, h: insightH,
-      fontSize: 12, color: mutedColor,
-      align: 'center', valign: 'middle', fontFace: font,
+    slide.addText('Deep Dive Analysis', {
+      x: chartX,
+      y: contentY,
+      w: chartW,
+      h: contentH,
+      fontSize: 12,
+      color: mutedColor,
+      align: 'center',
+      valign: 'middle',
+      fontFace: font,
     });
   }
 
+  // === Native Insight ===
+  drawSlideInsight(slide, pptx, tv, {
+    x: insightX,
+    y: contentY,
+    w: insightW,
+    h: contentH,
+    label: 'Summary & Actions',
+    text: exportData.insightText || '',
+  });
+
   // === Native Footer ===
-  drawNativeFooter(slide, pptx, config, primaryColor, font,
-    exportData.currentPage || 1, exportData.totalPages || 1);
+  drawNativeFooter(
+    slide,
+    pptx,
+    config,
+    primaryColor,
+    font,
+    exportData.currentPage || 1,
+    exportData.totalPages || 1,
+  );
 }
 
-// Create layout dashboard slide
-export function createLayoutDashboard(pptx: PptxGenJS, config: ReportConfig, title: string) {
+// ─── Overview Native Export ─────────────────────────────────────
+
+interface OverviewExportData {
+  title?: string;
+  channel?: string;
+  visualMode?: 'chart' | 'table' | null;
+  chartData?: {
+    type: string;
+    orientation?: string;
+    labels: string[];
+    series: { name: string; values: number[] }[];
+  } | null;
+  tableHeaders?: string[];
+  tableRows?: string[][];
+  insightText?: string;
+  currentPage?: number;
+  totalPages?: number;
+}
+
+/**
+ * Create an overview slide: All native elements with background from theme.
+ * Visual area (chart/table) takes most space, with smaller insight area below.
+ */
+export function createOverviewNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  exportData: OverviewExportData,
+) {
   const slide = pptx.addSlide();
-  slide.background = { color: 'FFFFFF' };
+  const tv = getSlideThemeVars(config);
 
-  // Header
-  slide.addShape(pptx.ShapeType.rect, {
-    x: 0,
-    y: 0,
-    w: 10,
-    h: 0.7,
-    fill: { color: 'F9FAFB' },
-    line: { type: 'none' },
+  // Shared background + decorations + header
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(slide, pptx, tv, exportData.title || 'Overview Slide', exportData.channel);
+
+  const font = tv.font;
+  const isDark = tv.isDark;
+  const textColor = tv.textColor;
+  const mutedColor = tv.mutedColor;
+  const cardBg = tv.cardBg;
+  const borderColor = tv.borderColor;
+
+  // === Visual Area (chart or table) ===
+  const headerH = 0.55;
+  const visualY = 0.3 + headerH + 0.15;
+  const footerY = 5.15;
+  const insightH = 1.1;
+  const insightY = footerY - insightH - 0.08;
+  const visualH = insightY - visualY - 0.15;
+
+  // Visual card bg
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: 0.3,
+    y: visualY,
+    w: 9.4,
+    h: visualH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: {
+      type: 'outer',
+      blur: 6,
+      offset: 2,
+      color: tv.primaryColor,
+      opacity: isDark ? 0.1 : 0.06,
+    },
   });
 
-  slide.addText(title, {
-    x: 0.4,
-    y: 0.2,
-    w: 9,
-    h: 0.3,
-    fontSize: 22,
-    bold: true,
-    color: '1F2937',
-    valign: 'middle',
+  if (
+    exportData.visualMode === 'chart' &&
+    exportData.chartData &&
+    exportData.chartData.series.length > 0
+  ) {
+    const cd = exportData.chartData;
+    const chartColors = [
+      '3B82F6',
+      '10B981',
+      'F59E0B',
+      'EF4444',
+      '8B5CF6',
+      'EC4899',
+      '06B6D4',
+      'F97316',
+    ];
+    const isBar = cd.type === 'bar';
+    const isHorizontalBar = isBar && cd.orientation !== 'vertical';
+    const chartSeries = cd.series.map((s) => ({
+      name: s.name,
+      labels: cd.labels,
+      values: s.values,
+    }));
+
+    if (cd.type === 'pie') {
+      slide.addChart(pptx.ChartType.pie, chartSeries, {
+        x: 0.4,
+        y: visualY + 0.1,
+        w: 9.2,
+        h: visualH - 0.2,
+        chartColors: chartColors.slice(0, cd.labels.length),
+        showLegend: true,
+        legendPos: 'r',
+        legendFontSize: 8,
+        showTitle: false,
+        showPercent: true,
+        dataLabelFontSize: 8,
+      });
+    } else if (isBar) {
+      slide.addChart(pptx.ChartType.bar, chartSeries, {
+        x: 0.4,
+        y: visualY + 0.1,
+        w: 9.2,
+        h: visualH - 0.2,
+        chartColors: chartColors.slice(0, cd.series.length),
+        barDir: isHorizontalBar ? 'bar' : 'col',
+        barGrouping: 'clustered',
+        barGapWidthPct: 80,
+        showLegend: true,
+        legendPos: 't',
+        legendFontSize: 8,
+        showTitle: false,
+        showValue: false,
+        valGridLine: { style: 'dash', color: isDark ? '334155' : 'E2E8F0' },
+        catGridLine: { style: 'none' },
+        catAxisLabelFontSize: 8,
+        valAxisLabelFontSize: 8,
+        catAxisLabelColor: mutedColor,
+        valAxisLabelColor: mutedColor,
+        catAxisLineShow: false,
+        valAxisLineShow: false,
+      });
+    } else {
+      slide.addChart(pptx.ChartType.line, chartSeries, {
+        x: 0.4,
+        y: visualY + 0.1,
+        w: 9.2,
+        h: visualH - 0.2,
+        chartColors: chartColors.slice(0, cd.series.length),
+        showLegend: true,
+        legendPos: 't',
+        legendFontSize: 8,
+        showTitle: false,
+        lineSmooth: true,
+        lineSize: 2,
+        lineDataSymbolSize: cd.labels.length > 10 ? 4 : 6,
+        valGridLine: { style: 'dash', color: isDark ? '334155' : 'E2E8F0' },
+        catGridLine: { style: 'none' },
+        catAxisLabelFontSize: 8,
+        valAxisLabelFontSize: 8,
+        catAxisLabelColor: mutedColor,
+        valAxisLabelColor: mutedColor,
+        catAxisLineShow: false,
+        valAxisLineShow: false,
+      });
+    }
+  } else if (exportData.visualMode === 'table' && exportData.tableHeaders && exportData.tableRows) {
+    const tHeaderStyle = {
+      bold: true,
+      fontSize: 8,
+      color: mutedColor,
+      fill: { color: isDark ? '0F172A' : 'F8FAFC' },
+      align: 'center' as const,
+      valign: 'middle' as const,
+      fontFace: font,
+    };
+    const tCellStyle = {
+      fontSize: 8,
+      color: textColor,
+      align: 'center' as const,
+      valign: 'middle' as const,
+      fontFace: font,
+    };
+    const tRows: any[][] = [
+      exportData.tableHeaders.map((h) => ({ text: h, options: tHeaderStyle })),
+    ];
+    exportData.tableRows.forEach((row) => {
+      tRows.push(
+        row.map((v, i) => ({
+          text: v,
+          options: i === 0 ? { ...tCellStyle, bold: true, align: 'left' as const } : tCellStyle,
+        })),
+      );
+    });
+    const rowH = Math.min(0.35, (visualH - 0.3) / tRows.length);
+    slide.addTable(tRows, {
+      x: 0.4,
+      y: visualY + 0.15,
+      w: 9.2,
+      fontSize: 8,
+      border: { pt: 0.5, color: borderColor },
+      align: 'center',
+      valign: 'middle',
+      fontFace: font,
+      color: textColor,
+      rowH: tRows.map(() => rowH),
+    });
+  } else {
+    slide.addText('Visual Analysis', {
+      x: 0.3,
+      y: visualY,
+      w: 9.4,
+      h: visualH,
+      fontSize: 12,
+      color: mutedColor,
+      align: 'center',
+      valign: 'middle',
+      fontFace: font,
+    });
+  }
+
+  // === Insight (shared helper) ===
+  drawSlideInsight(slide, pptx, tv, {
+    x: 0.3,
+    y: insightY,
+    w: 9.4,
+    h: insightH,
+    label: 'Comparative Analysis & Notes',
+    text: exportData.insightText || '',
   });
 
-  // KPI Cards - 3 cards
-  const kpis = [
-    { label: 'TOTAL REACH', value: '45.2M', trend: '+12.5%', color: '3B82F6' },
-    { label: 'ENGAGEMENT', value: '2.8M', trend: '+8.3%', color: '10B981' },
-    { label: 'GROWTH RATE', value: '15.7%', trend: '+2.1%', color: '8B5CF6' },
-  ];
+  // === Footer ===
+  drawNativeFooter(
+    slide,
+    pptx,
+    config,
+    tv.primaryColor,
+    font,
+    exportData.currentPage || 1,
+    exportData.totalPages || 1,
+  );
+}
+// ─── Content Native Export ──────────────────────────────────────
 
-  kpis.forEach((kpi, idx) => {
-    const xPos = 0.4 + idx * 3.1;
+export interface ContentPostExportData {
+  imageBase64: string;
+  postId: string;
+  reach: string;
+  engagement: string;
+  er: string;
+  filterBadge?: string; // 'top' | 'low' | ''
+}
 
-    // Card
+interface ContentNativeExportData {
+  title?: string;
+  channel?: string;
+  insightText?: string;
+  currentPage?: number;
+  totalPages?: number;
+  posts: ContentPostExportData[];
+  postCount?: number;
+  filterType?: string;
+}
+
+/**
+ * Fully native content/creative analysis slide — no screenshot required.
+ * Renders post cards with images (or placeholders), stats, insight, footer.
+ */
+export function createContentNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  exportData: ContentNativeExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+
+  // Shared background + decorations + header
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(slide, pptx, tv, exportData.title || 'Creative Analysis', exportData.channel, {
+    headerH: 0.5,
+  });
+
+  const font = tv.font;
+  const isDark = tv.isDark;
+  const textColor = tv.textColor;
+  const mutedColor = tv.mutedColor;
+  const primaryColor = tv.primaryColor;
+  const cardBg = tv.cardBg;
+  const borderColor = tv.borderColor;
+  const borderLightColor = isDark ? '1E293B' : 'F1F5F9';
+  const headerX = 0.3;
+  const headerY = 0.3;
+  const headerW = 9.4;
+  const headerH = 0.5;
+
+  // ── Post Grid ──────────────────────────────────────────────────
+  const posts = exportData.posts || [];
+  const postCount = exportData.postCount || posts.length || 4;
+
+  const gridX = 0.3;
+  const gridY = 0.9;
+  const gridW = 9.4;
+  const gridH = 3.1;
+  const cols = Math.min(postCount, 8);
+  const gapW = postCount <= 4 ? 0.1 : postCount <= 6 ? 0.08 : 0.06;
+  const cardW = (gridW - (cols - 1) * gapW) / cols;
+  const cardH = gridH;
+
+  // Image area is ~62% of card height; stats below
+  const imageAreaH = parseFloat((cardH * 0.62).toFixed(3));
+  const statsAreaH = parseFloat((cardH - imageAreaH).toFixed(3));
+
+  // Font sizes scale with card width
+  const fs = postCount <= 4 ? 8 : postCount <= 6 ? 6.5 : 5.5;
+  const fsLabel = postCount <= 4 ? 7 : postCount <= 6 ? 5.5 : 4.5;
+
+  posts.forEach((post, idx) => {
+    if (idx >= cols) return; // safety: one row only
+    const cx = gridX + idx * (cardW + gapW);
+    const cy = gridY;
+
+    // Card background
+    const radius = postCount >= 6 ? 0.06 : 0.08;
     slide.addShape(pptx.ShapeType.roundRect, {
-      x: xPos,
-      y: 0.95,
-      w: 2.9,
-      h: 0.9,
-      fill: { color: 'FFFFFF' },
-      line: { color: 'E5E7EB', width: 1 },
-      shadow: {
-        type: 'outer',
-        blur: 3,
-        offset: 1,
-        angle: 90,
-        color: '000000',
-        opacity: 0.08,
-      },
+      x: cx,
+      y: cy,
+      w: cardW,
+      h: cardH,
+      fill: { color: cardBg },
+      line: { color: borderColor, width: 0.5 },
+      rectRadius: radius,
     });
 
-    // Color bar
-    slide.addShape(pptx.ShapeType.rect, {
-      x: xPos,
-      y: 0.95,
-      w: 0.15,
-      h: 0.9,
-      fill: { color: kpi.color },
-      line: { type: 'none' },
+    // Image area
+    if (post.imageBase64) {
+      slide.addImage({
+        data: post.imageBase64,
+        x: cx,
+        y: cy,
+        w: cardW,
+        h: imageAreaH,
+      });
+      // overlay rounded clip illusion — draw top-rounding strip over image corners
+    } else {
+      // Placeholder with gentle bg
+      slide.addShape(pptx.ShapeType.rect, {
+        x: cx,
+        y: cy,
+        w: cardW,
+        h: imageAreaH,
+        fill: { color: isDark ? '1E293B' : 'F1F5F9' },
+        line: { type: 'none' },
+      });
+      slide.addText('[ Image ]', {
+        x: cx,
+        y: cy,
+        w: cardW,
+        h: imageAreaH,
+        fontSize: fsLabel,
+        color: mutedColor,
+        align: 'center',
+        valign: 'middle',
+        fontFace: font,
+      });
+    }
+
+    // Filter badge (top or low) for mixed mode
+    if (post.filterBadge === 'top' || post.filterBadge === 'low') {
+      const badgeColor = post.filterBadge === 'top' ? '10B981' : 'F43F5E';
+      const badgeW = postCount <= 4 ? 0.5 : 0.4;
+      const badgeH = postCount <= 4 ? 0.16 : 0.13;
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: cx + 0.06,
+        y: cy + 0.06,
+        w: badgeW,
+        h: badgeH,
+        fill: { color: badgeColor },
+        line: { type: 'none' },
+        rectRadius: 0.05,
+      });
+      slide.addText(post.filterBadge.toUpperCase(), {
+        x: cx + 0.06,
+        y: cy + 0.06,
+        w: badgeW,
+        h: badgeH,
+        fontSize: postCount <= 4 ? 5 : 4,
+        bold: true,
+        color: 'FFFFFF',
+        align: 'center',
+        valign: 'middle',
+        fontFace: font,
+      });
+    }
+
+    // Stats section separator
+    const statsY = cy + imageAreaH;
+    slide.addShape(pptx.ShapeType.line, {
+      x: cx,
+      y: statsY,
+      w: cardW,
+      h: 0,
+      line: { color: borderLightColor, width: 0.5 },
     });
 
-    slide.addText(kpi.label, {
-      x: xPos + 0.3,
-      y: 1.05,
-      w: 2.4,
-      h: 0.2,
-      fontSize: 9,
-      color: '6B7280',
+    // Post ID header row
+    const idRowH = statsAreaH * 0.28;
+    const idRowY = statsY + statsAreaH * 0.04;
+    slide.addText(post.postId || `#${204 + idx}`, {
+      x: cx + 0.06,
+      y: idRowY,
+      w: cardW - 0.12,
+      h: idRowH,
+      fontSize: fs,
       bold: true,
+      color: textColor,
+      align: 'left',
+      valign: 'middle',
+      fontFace: font,
     });
 
-    slide.addText(kpi.value, {
-      x: xPos + 0.3,
-      y: 1.3,
-      w: 2.4,
-      h: 0.3,
-      fontSize: 24,
-      color: '111827',
-      bold: true,
+    // Divider under ID
+    const dividerY = statsY + idRowH + statsAreaH * 0.06;
+    slide.addShape(pptx.ShapeType.line, {
+      x: cx + 0.06,
+      y: dividerY,
+      w: cardW - 0.12,
+      h: 0,
+      line: { color: borderLightColor, width: 0.4 },
     });
 
-    slide.addText(kpi.trend, {
-      x: xPos + 0.3,
-      y: 1.65,
-      w: 2.4,
-      h: 0.15,
-      fontSize: 10,
-      color: '10B981',
-      bold: true,
+    // Three stat rows: Reach, Engagement, ER
+    const statsStartY = dividerY + 0.04;
+    const statRowH = (statsY + statsAreaH - 0.06 - statsStartY) / 3;
+
+    const statRows = [
+      { label: postCount <= 4 ? 'Reach' : 'Rch', value: post.reach, color: textColor },
+      { label: postCount <= 4 ? 'Engagement' : 'Eng', value: post.engagement, color: textColor },
+      {
+        label: postCount <= 4 ? 'Eng. Rate' : 'ER',
+        value: post.er,
+        color: post.er && parseFloat(post.er) > 2.5 ? '10B981' : 'F59E0B',
+      },
+    ];
+
+    statRows.forEach((row, ri) => {
+      const ry = statsStartY + ri * statRowH;
+      slide.addText(row.label, {
+        x: cx + 0.06,
+        y: ry,
+        w: cardW * 0.52,
+        h: statRowH,
+        fontSize: fsLabel,
+        color: mutedColor,
+        align: 'left',
+        valign: 'middle',
+        fontFace: font,
+      });
+      slide.addText(row.value || '-', {
+        x: cx + cardW * 0.48,
+        y: ry,
+        w: cardW * 0.46,
+        h: statRowH,
+        fontSize: fsLabel,
+        bold: ri === 2, // bold ER
+        color: row.color,
+        align: 'right',
+        valign: 'middle',
+        fontFace: font,
+      });
     });
   });
 
-  // Chart Title
-  slide.addText('Performance Trends (Last 6 Months)', {
-    x: 0.4,
-    y: 2.05,
-    w: 9,
-    h: 0.25,
-    fontSize: 13,
-    bold: true,
-    color: '1F2937',
+  // ── Insight Panel (shared helper) ─────────────────────────────
+  const footerY = 5.15;
+  const insightH = 0.95;
+  const insightY = footerY - insightH - 0.08;
+
+  drawSlideInsight(slide, pptx, tv, {
+    x: headerX,
+    y: insightY,
+    w: headerW,
+    h: insightH,
+    label: 'Visual Strategy Notes & Insights',
+    text: exportData.insightText || '',
   });
 
-  // Line chart
-  const chartData = [
-    {
-      name: 'Reach',
-      labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-      values: [38, 40, 42, 43, 44, 45.2],
-    },
-    {
-      name: 'Engagement',
-      labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-      values: [2.2, 2.3, 2.5, 2.6, 2.7, 2.8],
-    },
-  ];
-
-  const chartColors = getChartColors(config);
-
-  slide.addChart(pptx.ChartType.line, chartData, {
-    x: 0.4,
-    y: 2.4,
-    w: 9.2,
-    h: 2.2,
-    chartColors: [chartColors[0], chartColors[1]],
-    showLegend: true,
-    showTitle: false,
-    valGridLine: { style: 'dash', color: 'E5E7EB' },
-    catGridLine: { style: 'none' },
-    catAxisLabelFontSize: 10,
-    valAxisLabelFontSize: 10,
-    catAxisLabelColor: '6B7280',
-    valAxisLabelColor: '6B7280',
-  });
-
-  // Table
-  slide.addText('Detailed Metrics', {
-    x: 0.4,
-    y: 4.75,
-    w: 9,
-    h: 0.2,
-    fontSize: 12,
-    bold: true,
-    color: '1F2937',
-  });
-
-  const tableData = [
-    [
-      {
-        text: 'METRIC',
-        options: { bold: true, fontSize: 9, color: '6B7280', fill: { color: 'F9FAFB' } },
-      },
-      {
-        text: 'CURRENT',
-        options: { bold: true, fontSize: 9, color: '6B7280', fill: { color: 'F9FAFB' } },
-      },
-      {
-        text: 'PREVIOUS',
-        options: { bold: true, fontSize: 9, color: '6B7280', fill: { color: 'F9FAFB' } },
-      },
-      {
-        text: 'CHANGE',
-        options: { bold: true, fontSize: 9, color: '6B7280', fill: { color: 'F9FAFB' } },
-      },
-    ],
-    [
-      { text: 'Reach', options: {} },
-      { text: '45.2M', options: { bold: true } },
-      { text: '40.4M', options: {} },
-      { text: '+12.5%', options: { color: '10B981', bold: true } },
-    ],
-    [
-      { text: 'Engagement', options: {} },
-      { text: '2.8M', options: { bold: true } },
-      { text: '2.6M', options: {} },
-      { text: '+8.3%', options: { color: '10B981', bold: true } },
-    ],
-  ];
-
-  slide.addTable(tableData, {
-    x: 0.4,
-    y: 5.05,
-    w: 9.2,
-    h: 0.35,
-    fontSize: 9,
-    border: { pt: 1, color: 'E5E7EB' },
-    align: 'center',
-    valign: 'middle',
-    color: '374151',
-  });
+  // ── Footer ─────────────────────────────────────────────────────
+  drawNativeFooter(
+    slide,
+    pptx,
+    config,
+    primaryColor,
+    font,
+    exportData.currentPage || 1,
+    exportData.totalPages || 1,
+  );
 }
 
 // Create layout comparison slide
@@ -2061,7 +3308,7 @@ export function exportToPPTX(slides: Slide[], config: ReportConfig) {
     } else if (slideData.type === 'dashboard') {
       createInstagramDashboard(pptx, config);
     } else if (slideData.type === 'layout_dashboard') {
-      createLayoutDashboard(pptx, config, slideData.title);
+      createLayoutDashboardNative(pptx, config, { title: slideData.title });
     } else if (slideData.type === 'layout_comparison') {
       createLayoutComparison(pptx, config, slideData.title);
     } else if (slideData.type === 'layout_kpi') {

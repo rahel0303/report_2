@@ -179,7 +179,7 @@ export const handleDownload = async (
               });
 
               // Restore visibility
-              hiddenEls.forEach((el) => (el as HTMLElement).style.visibility = '');
+              hiddenEls.forEach((el) => ((el as HTMLElement).style.visibility = ''));
 
               // Extract takeaways text from DOM
               const takeawaysEl = exportDiv.querySelector('[data-dashboard-text="takeaways"]');
@@ -212,11 +212,17 @@ export const handleDownload = async (
               createDashboardSlideHybrid(pptx, config, bgImage, { takeaways, tableData });
               console.log(`✅ Dashboard captured (hybrid: bg + native chart/table/insights)`);
             } catch (error) {
-              console.error('Dashboard hybrid export failed, falling back to full screenshot:', error);
+              console.error(
+                'Dashboard hybrid export failed, falling back to full screenshot:',
+                error,
+              );
               // Fall back to full screenshot
               try {
                 const imgData = await toPng(exportDiv, {
-                  cacheBust: true, width: 1920, height: 1080, pixelRatio: 2,
+                  cacheBust: true,
+                  width: 1920,
+                  height: 1080,
+                  pixelRatio: 2,
                   backgroundColor: '#ffffff',
                 });
                 const pptxSlide = pptx.addSlide();
@@ -224,7 +230,13 @@ export const handleDownload = async (
               } catch {
                 const pptxSlide = pptx.addSlide();
                 pptxSlide.addText('Error capturing dashboard', {
-                  x: 1, y: 2.5, w: 8, h: 0.5, fontSize: 24, color: 'FF0000', align: 'center',
+                  x: 1,
+                  y: 2.5,
+                  w: 8,
+                  h: 0.5,
+                  fontSize: 24,
+                  color: 'FF0000',
+                  align: 'center',
                 });
               }
             }
@@ -232,7 +244,7 @@ export const handleDownload = async (
           continue;
         }
 
-        // Layout Dashboard: screenshot bg + native chart/table/insight
+        // Layout Dashboard: fully native – same approach as KPI/Overview (no screenshot)
         if (slide.type === 'layout_dashboard') {
           const exportDiv = document.querySelector(
             `[data-slide-id="${slide.id}"][data-slide-export="true"]`,
@@ -240,49 +252,10 @@ export const handleDownload = async (
 
           if (exportDiv) {
             try {
-              await new Promise((resolve) => setTimeout(resolve, 500));
+              await new Promise((resolve) => setTimeout(resolve, 300));
 
-              // Hide elements that will be replaced with native editable elements
-              const hideSelectors = [
-                '[data-layout-header]',
-                '[data-layout-chart]',
-                '[data-layout-table]',
-                '[data-layout-insight]',
-                '[data-layout-footer]',
-              ];
-              const hiddenEls: HTMLElement[] = [];
-              hideSelectors.forEach((sel) => {
-                exportDiv.querySelectorAll(sel).forEach((el) => {
-                  (el as HTMLElement).style.visibility = 'hidden';
-                  hiddenEls.push(el as HTMLElement);
-                });
-              });
-
-              const bgImage = await toPng(exportDiv, {
-                cacheBust: true, width: 1920, height: 1080, pixelRatio: 2,
-                filter: (node) => {
-                  if (node.nodeName === 'SCRIPT' || node.nodeName === 'NOSCRIPT') return false;
-                  return true;
-                },
-                style: {
-                  transform: 'scale(1)', transformOrigin: 'top left',
-                  position: 'relative', left: '0', top: '0', margin: '0', padding: '0',
-                },
-              });
-
-              // Restore visibility
-              hiddenEls.forEach((el) => el.style.visibility = '');
-
-              // Use slide title directly from state
               const slideTitle = slide.title || 'Dashboard';
-
-              // Extract insight text
-              const insightEl = exportDiv.querySelector('[data-layout-insight]');
-              let insightText = '';
-              if (insightEl) {
-                const contentDiv = insightEl.querySelector('.whitespace-pre-wrap');
-                insightText = contentDiv?.textContent?.trim() || '';
-              }
+              const channel = slide.content?.channel || '';
 
               // Extract chart info from DOM
               const chartEl = exportDiv.querySelector('[data-layout-chart]') as HTMLElement;
@@ -292,14 +265,23 @@ export const handleDownload = async (
                 chartData = extractChartInfo(chartEl);
               }
 
+              // Extract insight text
+              const insightEl = exportDiv.querySelector('[data-layout-insight]');
+              let insightText = '';
+              if (insightEl) {
+                const contentDiv = insightEl.querySelector('.whitespace-pre-wrap');
+                insightText = contentDiv?.textContent?.trim() || '';
+              }
+
               // Extract table data from DOM
               const tableEl = exportDiv.querySelector('[data-layout-table] table');
               const tableHeaders: string[] = [];
               const tableRows: string[][] = [];
               let tableTitle = '';
               if (tableEl) {
-                // Try to get table title from caption or nearby header
-                const captionEl = exportDiv.querySelector('[data-layout-table] caption, [data-layout-table] h3, [data-layout-table] .font-semibold');
+                const captionEl = exportDiv.querySelector(
+                  '[data-layout-table] caption, [data-layout-table] h3, [data-layout-table] .font-semibold',
+                );
                 tableTitle = captionEl?.textContent?.trim() || '';
                 tableEl.querySelectorAll('thead th').forEach((th) => {
                   tableHeaders.push(th.textContent?.trim() || '');
@@ -313,11 +295,8 @@ export const handleDownload = async (
                 });
               }
 
-              // Extract channel from slide data
-              const channel = slide.content?.channel || '';
-
-              const { createLayoutDashboardHybrid } = await import('./pptxExporter');
-              createLayoutDashboardHybrid(pptx, config, bgImage, {
+              const { createLayoutDashboardNative } = await import('./pptxExporter');
+              createLayoutDashboardNative(pptx, config, {
                 title: slideTitle,
                 channel,
                 chartData,
@@ -328,22 +307,19 @@ export const handleDownload = async (
                 currentPage: i + 1,
                 totalPages: slides.length,
               });
-              console.log(`✅ Layout dashboard captured (hybrid: bg screenshot + native table/insight/footer)`);
+              console.log(`✅ Layout dashboard created (native – same as KPI/Overview)`);
             } catch (error) {
-              console.error('Layout dashboard hybrid failed, falling back to screenshot:', error);
-              try {
-                const imgData = await toPng(exportDiv, {
-                  cacheBust: true, width: 1920, height: 1080, pixelRatio: 2,
-                  backgroundColor: '#ffffff',
-                });
-                const pptxSlide = pptx.addSlide();
-                pptxSlide.addImage({ data: imgData, x: 0, y: 0, w: '100%', h: '100%' });
-              } catch {
-                const pptxSlide = pptx.addSlide();
-                pptxSlide.addText(`Error capturing: ${slide.title}`, {
-                  x: 1, y: 2.5, w: 8, h: 0.5, fontSize: 24, color: 'FF0000', align: 'center',
-                });
-              }
+              console.error('Layout dashboard native failed:', error);
+              const pptxSlide = pptx.addSlide();
+              pptxSlide.addText(`Error creating: ${slide.title}`, {
+                x: 1,
+                y: 2.5,
+                w: 8,
+                h: 0.5,
+                fontSize: 24,
+                color: 'FF0000',
+                align: 'center',
+              });
             }
           }
           continue;
@@ -376,19 +352,27 @@ export const handleDownload = async (
               });
 
               const bgImage = await toPng(exportDiv, {
-                cacheBust: true, width: 1920, height: 1080, pixelRatio: 2,
+                cacheBust: true,
+                width: 1920,
+                height: 1080,
+                pixelRatio: 2,
                 filter: (node) => {
                   if (node.nodeName === 'SCRIPT' || node.nodeName === 'NOSCRIPT') return false;
                   return true;
                 },
                 style: {
-                  transform: 'scale(1)', transformOrigin: 'top left',
-                  position: 'relative', left: '0', top: '0', margin: '0', padding: '0',
+                  transform: 'scale(1)',
+                  transformOrigin: 'top left',
+                  position: 'relative',
+                  left: '0',
+                  top: '0',
+                  margin: '0',
+                  padding: '0',
                 },
               });
 
               // Restore visibility
-              hiddenEls.forEach((el) => el.style.visibility = '');
+              hiddenEls.forEach((el) => (el.style.visibility = ''));
 
               // Use slide title directly from state
               const slideTitle = slide.title || 'Comparison';
@@ -430,12 +414,17 @@ export const handleDownload = async (
                 currentPage: i + 1,
                 totalPages: slides.length,
               });
-              console.log(`✅ Layout comparison captured (hybrid: bg + native charts/insight/footer)`);
+              console.log(
+                `✅ Layout comparison captured (hybrid: bg + native charts/insight/footer)`,
+              );
             } catch (error) {
               console.error('Layout comparison hybrid failed, falling back to screenshot:', error);
               try {
                 const imgData = await toPng(exportDiv, {
-                  cacheBust: true, width: 1920, height: 1080, pixelRatio: 2,
+                  cacheBust: true,
+                  width: 1920,
+                  height: 1080,
+                  pixelRatio: 2,
                   backgroundColor: '#ffffff',
                 });
                 const pptxSlide = pptx.addSlide();
@@ -443,9 +432,321 @@ export const handleDownload = async (
               } catch {
                 const pptxSlide = pptx.addSlide();
                 pptxSlide.addText(`Error capturing: ${slide.title}`, {
-                  x: 1, y: 2.5, w: 8, h: 0.5, fontSize: 24, color: 'FF0000', align: 'center',
+                  x: 1,
+                  y: 2.5,
+                  w: 8,
+                  h: 0.5,
+                  fontSize: 24,
+                  color: 'FF0000',
+                  align: 'center',
                 });
               }
+            }
+          }
+          continue;
+        }
+
+        // Layout KPI: native elements only (no screenshot background)
+        if (slide.type === 'layout_kpi') {
+          const exportDiv = document.querySelector(
+            `[data-slide-id="${slide.id}"][data-slide-export="true"]`,
+          ) as HTMLElement;
+
+          if (exportDiv) {
+            try {
+              await new Promise((resolve) => setTimeout(resolve, 500));
+
+              const slideTitle = slide.title || 'KPI Overview';
+              const channel = slide.content?.channel || '';
+
+              // Extract metrics data
+              const metricsEl = exportDiv.querySelector('[data-kpi-metrics]') as HTMLElement;
+              const metrics: Array<{
+                label: string;
+                value: string;
+                trend: 'up' | 'down';
+                trendValue: string;
+                iconId?: string;
+              }> = [];
+              if (metricsEl) {
+                metricsEl.querySelectorAll('.rounded-xl.border').forEach((card) => {
+                  const labelEl = card.querySelector('.uppercase.tracking-wider');
+                  const valueEl = card.querySelector('.font-bold.tracking-tight');
+                  const trendEl = card.querySelector('.rounded-full');
+
+                  if (labelEl && valueEl) {
+                    const label = labelEl.textContent?.trim() || '';
+                    const value = valueEl.textContent?.trim() || '';
+                    const trendText = trendEl?.textContent?.trim() || '';
+                    const trend =
+                      trendEl?.classList.contains('text-emerald-600') ||
+                      trendEl?.classList.contains('dark:text-emerald-400')
+                        ? 'up'
+                        : 'down';
+
+                    metrics.push({
+                      label,
+                      value,
+                      trend: trend as 'up' | 'down',
+                      trendValue: trendText,
+                    });
+                  }
+                });
+              }
+
+              // Extract chart data
+              const chartEl = exportDiv.querySelector('[data-kpi-chart]') as HTMLElement;
+              let chartData: any = null;
+              if (chartEl) {
+                const { extractChartInfo } = await import('./pptxExporter');
+                chartData = extractChartInfo(chartEl);
+              }
+
+              // Extract insight text
+              const insightEl = exportDiv.querySelector('[data-kpi-insight]');
+              let insightText = '';
+              if (insightEl) {
+                const contentDiv = insightEl.querySelector('.whitespace-pre-wrap');
+                insightText = contentDiv?.textContent?.trim() || '';
+              }
+
+              const { createKPINative } = await import('./pptxExporter');
+              createKPINative(pptx, config, {
+                title: slideTitle,
+                channel,
+                metrics,
+                chartData,
+                insightText,
+                currentPage: i + 1,
+                totalPages: slides.length,
+              });
+              console.log(`✅ Layout KPI created (native)`);
+            } catch (error) {
+              console.error('Layout KPI native failed:', error);
+              const pptxSlide = pptx.addSlide();
+              pptxSlide.addText(`Error creating: ${slide.title}`, {
+                x: 1,
+                y: 2.5,
+                w: 8,
+                h: 0.5,
+                fontSize: 24,
+                color: 'FF0000',
+                align: 'center',
+              });
+            }
+          }
+          continue;
+        }
+
+        // Layout Overview: screenshot bg + native header, visual (chart/table screenshot), insight, footer
+        // Layout Overview: native elements only (no screenshot background)
+        if (slide.type === 'layout_overview') {
+          const exportDiv = document.querySelector(
+            `[data-slide-id="${slide.id}"][data-slide-export="true"]`,
+          ) as HTMLElement;
+
+          if (exportDiv) {
+            try {
+              await new Promise((resolve) => setTimeout(resolve, 500));
+
+              const slideTitle = slide.title || 'Overview Slide';
+              const channel = slide.content?.channel || '';
+              const visualMode = slide.content?.visualMode || null;
+
+              // Extract chart data if visual is chart
+              let chartData: any = null;
+              if (visualMode === 'chart') {
+                const chartEl = exportDiv.querySelector('[data-overview-visual]') as HTMLElement;
+                if (chartEl) {
+                  const { extractChartInfo } = await import('./pptxExporter');
+                  chartData = extractChartInfo(chartEl);
+                }
+              }
+
+              // Extract table data if visual is table
+              let tableHeaders: string[] = [];
+              let tableRows: string[][] = [];
+              if (visualMode === 'table') {
+                const tableEl = exportDiv.querySelector('[data-overview-visual] table');
+                if (tableEl) {
+                  tableEl.querySelectorAll('thead th').forEach((th) => {
+                    tableHeaders.push(th.textContent?.trim() || '');
+                  });
+                  tableEl.querySelectorAll('tbody tr').forEach((row) => {
+                    const cells: string[] = [];
+                    row.querySelectorAll('td').forEach((td) => {
+                      cells.push(td.textContent?.trim() || '');
+                    });
+                    if (cells.length > 0) tableRows.push(cells);
+                  });
+                }
+              }
+
+              // Extract insight text
+              const insightEl = exportDiv.querySelector('[data-overview-insight]');
+              let insightText = '';
+              if (insightEl) {
+                const contentDiv = insightEl.querySelector('.whitespace-pre-wrap');
+                insightText = contentDiv?.textContent?.trim() || '';
+              }
+
+              const { createOverviewNative } = await import('./pptxExporter');
+              createOverviewNative(pptx, config, {
+                title: slideTitle,
+                channel,
+                visualMode,
+                chartData,
+                tableHeaders: tableHeaders.length > 0 ? tableHeaders : undefined,
+                tableRows: tableRows.length > 0 ? tableRows : undefined,
+                insightText,
+                currentPage: i + 1,
+                totalPages: slides.length,
+              });
+              console.log(`✅ Layout Overview created (native)`);
+            } catch (error) {
+              console.error('Layout Overview native failed:', error);
+              const pptxSlide = pptx.addSlide();
+              pptxSlide.addText(`Error creating: ${slide.title}`, {
+                x: 1,
+                y: 2.5,
+                w: 8,
+                h: 0.5,
+                fontSize: 24,
+                color: 'FF0000',
+                align: 'center',
+              });
+            }
+          }
+          continue;
+        }
+
+        // Layout Content (Visual): screenshot bg with content grid + native header, insight, footer
+        if (slide.type === 'layout_content') {
+          const exportDiv = document.querySelector(
+            `[data-slide-id="${slide.id}"][data-slide-export="true"]`,
+          ) as HTMLElement;
+
+          if (exportDiv) {
+            try {
+              await new Promise((resolve) => setTimeout(resolve, 300));
+
+              const slideTitle = slide.title || 'Creative Analysis';
+              const channel = slide.content?.channel || '';
+              const postCount: number = slide.content?.postCount || 4;
+              const filterType: string = slide.content?.filterType || 'top';
+
+              // ── Extract post data from DOM ──────────────────────────────
+              const gridEl = exportDiv.querySelector('[data-content-grid]') as HTMLElement | null;
+              const postElements = gridEl
+                ? Array.from(gridEl.querySelectorAll('[data-content-post]'))
+                : [];
+
+              // Helper: draw img element onto canvas and return base64
+              const imgElToBase64 = (imgEl: HTMLImageElement): Promise<string> =>
+                new Promise((resolve) => {
+                  try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = imgEl.naturalWidth || imgEl.width || 400;
+                    canvas.height = imgEl.naturalHeight || imgEl.height || 400;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                      ctx.drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+                      resolve(canvas.toDataURL('image/jpeg', 0.88));
+                    } else {
+                      resolve('');
+                    }
+                  } catch {
+                    resolve('');
+                  }
+                });
+
+              type PostData = {
+                imageBase64: string;
+                postId: string;
+                reach: string;
+                engagement: string;
+                er: string;
+                filterBadge?: string;
+              };
+
+              const posts: PostData[] = await Promise.all(
+                postElements.map(async (cardEl): Promise<PostData> => {
+                  const imgEl = cardEl.querySelector('img') as HTMLImageElement | null;
+                  let imageBase64 = '';
+                  if (imgEl) {
+                    if (imgEl.complete && imgEl.naturalWidth > 0) {
+                      imageBase64 = await imgElToBase64(imgEl);
+                    } else if (imgEl.src) {
+                      await new Promise<void>((res) => {
+                        const tmp = new Image();
+                        tmp.crossOrigin = 'anonymous';
+                        tmp.onload = () => {
+                          imgEl.crossOrigin = 'anonymous';
+                          res();
+                        };
+                        tmp.onerror = () => res();
+                        tmp.src = imgEl.src;
+                      });
+                      imageBase64 = await imgElToBase64(imgEl);
+                    }
+                  }
+
+                  const postIdEl = cardEl.querySelector('[data-post-id]');
+                  const reachEl = cardEl.querySelector('[data-post-reach]');
+                  const engEl = cardEl.querySelector('[data-post-engagement]');
+                  const erEl = cardEl.querySelector('[data-post-er]');
+
+                  let filterBadge = '';
+                  if (filterType === 'mixed') {
+                    const badgeEl = cardEl.querySelector(
+                      '[class*="font-bold"][class*="rounded-full"]',
+                    );
+                    filterBadge = badgeEl?.textContent?.trim()?.toLowerCase() || '';
+                  }
+
+                  return {
+                    imageBase64,
+                    postId: postIdEl?.textContent?.trim() || '',
+                    reach: reachEl?.textContent?.trim() || '',
+                    engagement: engEl?.textContent?.trim() || '',
+                    er: erEl?.textContent?.trim() || '',
+                    filterBadge,
+                  };
+                }),
+              );
+
+              // ── Extract insight text ────────────────────────────────────
+              const insightEl = exportDiv.querySelector('[data-content-insight]');
+              let insightText = '';
+              if (insightEl) {
+                const contentDiv = insightEl.querySelector('.whitespace-pre-wrap');
+                insightText = contentDiv?.textContent?.trim() || '';
+              }
+
+              const { createContentNative } = await import('./pptxExporter');
+              createContentNative(pptx, config, {
+                title: slideTitle,
+                channel,
+                insightText,
+                currentPage: i + 1,
+                totalPages: slides.length,
+                posts,
+                postCount,
+                filterType,
+              });
+              console.log(`✅ Layout Content native (${posts.length} posts)`);
+            } catch (error) {
+              console.error('Layout Content native failed:', error);
+              const pptxSlide = pptx.addSlide();
+              pptxSlide.addText(`Error exporting: ${slide.title}`, {
+                x: 1,
+                y: 2.5,
+                w: 8,
+                h: 0.5,
+                fontSize: 20,
+                color: 'FF0000',
+                align: 'center',
+              });
             }
           }
           continue;
