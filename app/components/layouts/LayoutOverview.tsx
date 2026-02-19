@@ -113,11 +113,6 @@ export const LayoutOverview: React.FC<LayoutProps> = ({
       className="w-full h-full flex flex-col p-6 gap-4 pb-16 relative overflow-hidden"
       style={{ fontFamily: config.font.name, background: theme.pageBg }}
     >
-      {/* Decorative Elements */}
-      <div style={decorStyles.topRightCircle} />
-      <div style={decorStyles.bottomLeftCircle} />
-      <div style={decorStyles.accentLineTop} />
-
       {/* Header */}
       <div
         data-overview-header
@@ -128,16 +123,6 @@ export const LayoutOverview: React.FC<LayoutProps> = ({
           boxShadow: theme.cardShadow,
         }}
       >
-        {/* Header left accent bar */}
-        <div
-          className="absolute top-0 left-0 w-1 h-full rounded-l-xl"
-          style={{ background: theme.accentGradient }}
-        />
-        {/* Small decorative circle */}
-        <div
-          className="absolute -top-4 -right-4 w-20 h-20 rounded-full"
-          style={{ background: theme.decorCircle1 }}
-        />
         <div className="flex-1 pl-3">
           <EditableSlideTitle title={title} onChange={onTitleChange} isDark={isDark} />
         </div>
@@ -171,12 +156,6 @@ export const LayoutOverview: React.FC<LayoutProps> = ({
           boxShadow: theme.cardShadow,
         }}
       >
-        <div
-          className="absolute -bottom-8 -right-8 w-24 h-24 rounded-full"
-          style={{
-            background: `radial-gradient(circle, ${theme.decorCircle2} 0%, transparent 70%)`,
-          }}
-        />
         <SmartInsightBlock
           icon={Sparkles}
           label="Comparative Analysis & Notes"
