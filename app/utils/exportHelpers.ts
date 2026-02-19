@@ -40,8 +40,14 @@ async function embedSoraFontInPptx(pptxBuffer: ArrayBuffer): Promise<Blob> {
 
     // Generate a random GUID string
     function makeGuid(): string {
-      const hex = () => Math.floor(Math.random() * 0xFFFF).toString(16).padStart(4, '0');
-      const hex8 = () => Math.floor(Math.random() * 0xFFFFFFFF).toString(16).padStart(8, '0');
+      const hex = () =>
+        Math.floor(Math.random() * 0xffff)
+          .toString(16)
+          .padStart(4, '0');
+      const hex8 = () =>
+        Math.floor(Math.random() * 0xffffffff)
+          .toString(16)
+          .padStart(8, '0');
       return `{${hex8()}-${hex()}-${hex()}-${hex()}-${hex()}${hex()}${hex()}}`;
     }
 
@@ -50,8 +56,20 @@ async function embedSoraFontInPptx(pptxBuffer: ArrayBuffer): Promise<Blob> {
     const maxRId = rIdNums.length > 0 ? Math.max(...rIdNums) : 10;
 
     const fontDefs = [
-      { type: 'regular', file: 'Sora-Regular.ttf', rId: `rId${maxRId + 1}`, fntFile: 'font_sora_r.odttf', guid: makeGuid() },
-      { type: 'bold',    file: 'Sora-Bold.ttf',    rId: `rId${maxRId + 2}`, fntFile: 'font_sora_b.odttf', guid: makeGuid() },
+      {
+        type: 'regular',
+        file: 'Sora-Regular.ttf',
+        rId: `rId${maxRId + 1}`,
+        fntFile: 'font_sora_r.odttf',
+        guid: makeGuid(),
+      },
+      {
+        type: 'bold',
+        file: 'Sora-Bold.ttf',
+        rId: `rId${maxRId + 2}`,
+        fntFile: 'font_sora_b.odttf',
+        guid: makeGuid(),
+      },
     ];
 
     const fontRelXml: string[] = [];
@@ -66,7 +84,9 @@ async function embedSoraFontInPptx(pptxBuffer: ArrayBuffer): Promise<Blob> {
         const raw = await resp.arrayBuffer();
         // Obfuscate per OOXML spec
         const obfuscated = obfuscateFont(raw, fd.guid);
-        console.log(`[Font Embed] ${fd.file} → obfuscated ${obfuscated.length} bytes (guid=${fd.guid})`);
+        console.log(
+          `[Font Embed] ${fd.file} → obfuscated ${obfuscated.length} bytes (guid=${fd.guid})`,
+        );
         zip.file(`ppt/fonts/${fd.fntFile}`, obfuscated);
         fontRelXml.push(
           `<Relationship Id="${fd.rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="fonts/${fd.fntFile}"/>`,
@@ -92,7 +112,10 @@ async function embedSoraFontInPptx(pptxBuffer: ArrayBuffer): Promise<Blob> {
     if (presXml.includes('<p:embFontLst>')) {
       presXml = presXml.replace('</p:embFontLst>', `${embFontBlock}</p:embFontLst>`);
     } else {
-      presXml = presXml.replace('</p:presentation>', `<p:embFontLst>${embFontBlock}</p:embFontLst></p:presentation>`);
+      presXml = presXml.replace(
+        '</p:presentation>',
+        `<p:embFontLst>${embFontBlock}</p:embFontLst></p:presentation>`,
+      );
     }
     zip.file('ppt/presentation.xml', presXml);
     console.log('[Font Embed] Sora embedded + obfuscated successfully ✓');
@@ -926,12 +949,11 @@ export const handleDownload = async (
       // Embed Sora font if the report uses it
       const fontName = config.font?.name || 'Inter';
       console.log(`[Export] font name: "${fontName}"`);
-      const finalBlob =
-        fontName.toLowerCase().includes('sora')
-          ? await embedSoraFontInPptx(pptxBuffer)
-          : new Blob([pptxBuffer], {
-              type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            });
+      const finalBlob = fontName.toLowerCase().includes('sora')
+        ? await embedSoraFontInPptx(pptxBuffer)
+        : new Blob([pptxBuffer], {
+            type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+          });
 
       // Trigger browser download
       const dlUrl = URL.createObjectURL(finalBlob);
