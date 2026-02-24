@@ -75,7 +75,10 @@ export const LayoutContent: React.FC<LayoutProps> = ({
       className="w-full h-full flex flex-col p-6 gap-4 pb-16 relative overflow-hidden"
       style={{ fontFamily: config.font.name, background: theme.pageBg }}
     >
-      {/* Decorative elements removed for clean export */}
+      {/* Decorative Elements */}
+      <div style={decorStyles.topRightCircle} />
+      <div style={decorStyles.bottomLeftCircle} />
+      <div style={decorStyles.accentLineTop} />
 
       <ContentSelectionModal
         isOpen={showModal}
@@ -87,16 +90,26 @@ export const LayoutContent: React.FC<LayoutProps> = ({
       {/* Header Section */}
       <div
         data-content-header
-        className="shrink-0 rounded-xl flex items-center justify-between px-5 py-3 relative overflow-hidden"
+        className="h-[10%] shrink-0 rounded-xl p-4 flex items-center justify-between relative overflow-hidden"
         style={{
-          background: theme.headerBg,
+          backgroundColor: theme.cardBg,
           border: `1px solid ${theme.border}`,
+          boxShadow: theme.cardShadow,
         }}
       >
-        <div className="flex items-center gap-3">
+        {/* Header left accent bar */}
+        <div
+          className="absolute top-0 left-0 w-1 h-full rounded-l-xl"
+          style={{ background: theme.accentGradient }}
+        />
+        {/* Small decorative circle */}
+        <div
+          className="absolute -top-4 -right-4 w-20 h-20 rounded-full"
+          style={{ background: theme.decorCircle1 }}
+        />
+        <div className="flex-1 pl-3">
           <EditableSlideTitle title={title} onChange={onTitleChange} isDark={isDark} />
         </div>
-
         <div className="flex gap-2 items-center">
           {data.channel && <ChannelBadge channel={data.channel} isDark={isDark} size="lg" />}
         </div>
@@ -129,13 +142,18 @@ export const LayoutContent: React.FC<LayoutProps> = ({
         }`}
       >
         {data.postCount === undefined && data.filterType === undefined ? (
-          <div className="col-span-full flex items-center justify-center">
+          <div
+            className={`col-span-full w-full h-full border-2 border-dashed rounded-xl flex items-center justify-center transition-all cursor-pointer group ${
+              isDark
+                ? 'border-slate-600 bg-slate-800/30 hover:bg-slate-700/40 hover:border-slate-500'
+                : 'border-slate-300 bg-slate-50/50 hover:bg-blue-50/50 hover:border-blue-300'
+            }`}
+            onClick={() => setShowModal(true)}
+          >
             <EmptyStateBox
               icon={ImageIcon}
               title="Configure Visual Content"
               description="Select filter type and number of posts to display"
-              actionLabel="Configure Content"
-              onAction={() => setShowModal(true)}
               isDark={isDark}
             />
           </div>
