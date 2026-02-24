@@ -3,6 +3,48 @@
  * This is a client-side backup method if AI fails
  */
 
+// ─────────────────────────────────────────
+//  Color contrast utilities
+// ─────────────────────────────────────────
+
+/** Compute relative luminance of a hex color (0 = black, 1 = white). */
+export function hexLuminance(hex: string): number {
+  try {
+    const c = hex.replace('#', '');
+    if (c.length !== 6) return 0.5;
+    const r = parseInt(c.slice(0, 2), 16) / 255;
+    const g = parseInt(c.slice(2, 4), 16) / 255;
+    const b = parseInt(c.slice(4, 6), 16) / 255;
+    const toLinear = (v: number) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+  } catch {
+    return 0.5;
+  }
+}
+
+/**
+ * Returns '#111111' when the background is light, '#ffffff' when dark.
+ * Threshold: luminance > 0.35 → light background.
+ */
+export function getAutoTextColor(bgHex: string): string {
+  return hexLuminance(bgHex) > 0.35 ? '#111111' : '#ffffff';
+}
+
+/**
+ * Returns `textHex` if it already has ≥3:1 contrast ratio with `bgHex`,
+ * otherwise returns the auto-contrast fallback.
+ */
+export function ensureTextContrast(textHex: string, bgHex: string): string {
+  try {
+    const tL = hexLuminance(textHex);
+    const bL = hexLuminance(bgHex);
+    const ratio = (Math.max(tL, bL) + 0.05) / (Math.min(tL, bL) + 0.05);
+    return ratio < 3 ? getAutoTextColor(bgHex) : textHex;
+  } catch {
+    return textHex;
+  }
+}
+
 interface ColorCount {
   color: string;
   count: number;

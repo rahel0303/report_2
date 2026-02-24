@@ -1,5 +1,6 @@
 import React from 'react';
 import { CoverDesignProps } from '@/app/types/cover';
+import { getAutoTextColor, ensureTextContrast } from '@/app/utils/colorExtractor';
 
 // ─────────────────────────────────────────
 //  MODERN – Template 1: Neon Pulse
@@ -76,8 +77,8 @@ export const ModernNeonTemplate: React.FC<CoverDesignProps> = ({
           </div>
         )}
         <div
-          className="text-xs font-bold tracking-[0.4em] uppercase mb-4 opacity-60"
-          style={{ color: colors.primary }}
+          className="text-xs font-bold tracking-[0.4em] uppercase mb-4"
+          style={{ color: textColor, opacity: 0.6 }}
         >
           {period || 'Performance Report'}
         </div>
@@ -147,19 +148,6 @@ export const ModernSplitTemplate: React.FC<CoverDesignProps> = ({
             style={{ backgroundColor: 'rgba(255,255,255,0.15)' }}
           />
         </div>
-        {/* Vertical label */}
-        <div
-          data-cover-content
-          className="text-white font-bold tracking-[0.4em] uppercase"
-          style={{
-            writingMode: 'vertical-rl',
-            transform: 'rotate(180deg)',
-            fontSize: '10px',
-            opacity: 0.5,
-          }}
-        >
-          {period}
-        </div>
         {/* Bottom accent bar */}
         <div className="w-full h-1 rounded-full" style={{ backgroundColor: colors.accent }} />
       </div>
@@ -191,7 +179,10 @@ export const ModernSplitTemplate: React.FC<CoverDesignProps> = ({
             {subtitle}
           </p>
         )}
-        <div className="text-xs tracking-widest uppercase" style={{ color: '#999' }}>
+        <div
+          className="text-xs tracking-widest uppercase"
+          style={{ color: fontColor || '#999', opacity: 0.7 }}
+        >
           {period}
         </div>
       </div>
@@ -211,7 +202,7 @@ export const ModernGlassTemplate: React.FC<CoverDesignProps> = ({
   fontFamily,
   fontColor,
 }) => {
-  const textColor = fontColor || '#ffffff';
+  const textColor = fontColor || getAutoTextColor(colors.primary);
   return (
     <div
       className="relative w-full h-full overflow-hidden"
@@ -241,7 +232,10 @@ export const ModernGlassTemplate: React.FC<CoverDesignProps> = ({
             <img src={logo} alt="Logo" className="h-16 object-contain" />
           </div>
         )}
-        <div className="text-xs font-semibold tracking-[0.3em] uppercase mb-3 opacity-70">
+        <div
+          className="text-xs font-semibold tracking-[0.3em] uppercase mb-3"
+          style={{ color: textColor, opacity: 0.7 }}
+        >
           {period}
         </div>
         <h1
@@ -283,12 +277,16 @@ export const GeometricPrismTemplate: React.FC<CoverDesignProps> = ({
       className="relative w-full h-full overflow-hidden bg-gray-950"
       style={{ fontFamily: fontFamily || 'Inter' }}
     >
-      {/* Prism triangles */}
-      <svg className="absolute inset-0 w-full h-full">
-        <polygon points="0,0 100%,0 60%,100%" fill={colors.primary} opacity="0.9" />
-        <polygon points="60%,100% 100%,0 100%,100%" fill={colors.secondary} opacity="0.85" />
-        <polygon points="0,0 30%,100% 0,100%" fill={colors.accent} opacity="0.7" />
-        <polygon points="0,0 60%,100% 30%,100% 0,60%" fill={colors.primary} opacity="0.3" />
+      {/* Prism triangles — use viewBox so coordinates are resolution-independent */}
+      <svg
+        className="absolute inset-0 w-full h-full"
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+      >
+        <polygon points="0,0 100,0 60,100" fill={colors.primary} opacity="0.9" />
+        <polygon points="60,100 100,0 100,100" fill={colors.secondary} opacity="0.85" />
+        <polygon points="0,0 30,100 0,100" fill={colors.accent} opacity="0.7" />
+        <polygon points="0,0 60,100 30,100 0,60" fill={colors.primary} opacity="0.3" />
       </svg>
       {/* Sharp diagonal accent line */}
       <div
@@ -316,7 +314,12 @@ export const GeometricPrismTemplate: React.FC<CoverDesignProps> = ({
             />
           </div>
         )}
-        <div className="text-xs font-bold tracking-[0.4em] uppercase mb-3 opacity-60">{period}</div>
+        <div
+          className="text-xs font-bold tracking-[0.4em] uppercase mb-3"
+          style={{ color: textColor, opacity: 0.6 }}
+        >
+          {period}
+        </div>
         <h1
           className="text-6xl font-black mb-3 leading-tight drop-shadow-2xl"
           style={{ color: textColor }}
@@ -342,7 +345,7 @@ export const GeometricPrismTemplate: React.FC<CoverDesignProps> = ({
 }; // end GeometricPrismTemplate
 
 // ─────────────────────────────────────────
-//  GEOMETRIC – Template 5: Bauhaus Grid
+//  GEOMETRIC – Template 5: Bauhaus
 // ─────────────────────────────────────────
 export const GeometricBauhausTemplate: React.FC<CoverDesignProps> = ({
   colors,
@@ -353,7 +356,8 @@ export const GeometricBauhausTemplate: React.FC<CoverDesignProps> = ({
   fontFamily,
   fontColor,
 }) => {
-  const textColor = fontColor || colors.primary;
+  // Auto-contrast: if primary is too light for white bg, fall back to dark text
+  const textColor = fontColor || ensureTextContrast(colors.primary, '#ffffff');
   return (
     <div
       className="relative w-full h-full overflow-hidden bg-white"
@@ -402,7 +406,7 @@ export const GeometricBauhausTemplate: React.FC<CoverDesignProps> = ({
         )}
         <div
           className="text-xs font-bold tracking-[0.4em] uppercase mb-4"
-          style={{ color: colors.accent }}
+          style={{ color: fontColor || colors.accent }}
         >
           {period}
         </div>
@@ -436,7 +440,8 @@ export const GeometricHexTemplate: React.FC<CoverDesignProps> = ({
   fontFamily,
   fontColor,
 }) => {
-  const textColor = fontColor || '#ffffff';
+  // Auto-contrast: if primary gradient is light, use dark text instead of white
+  const textColor = fontColor || getAutoTextColor(colors.primary);
   return (
     <div
       className="relative w-full h-full overflow-hidden"
@@ -500,7 +505,12 @@ export const GeometricHexTemplate: React.FC<CoverDesignProps> = ({
             />
           </div>
         )}
-        <div className="text-xs font-bold tracking-[0.4em] uppercase mb-4 opacity-60">{period}</div>
+        <div
+          className="text-xs font-bold tracking-[0.4em] uppercase mb-4"
+          style={{ color: textColor, opacity: 0.6 }}
+        >
+          {period}
+        </div>
         <h1
           className="text-6xl font-black mb-4 leading-tight drop-shadow-2xl"
           style={{ color: textColor }}
@@ -529,7 +539,8 @@ export const MinimalistCleanTemplate: React.FC<CoverDesignProps> = ({
   fontFamily,
   fontColor,
 }) => {
-  const textColor = fontColor || colors.primary;
+  // Auto-contrast: if primary is too light for white bg, fall back to dark text
+  const textColor = fontColor || ensureTextContrast(colors.primary, '#ffffff');
   return (
     <div
       className="relative w-full h-full overflow-hidden bg-white"
@@ -565,7 +576,10 @@ export const MinimalistCleanTemplate: React.FC<CoverDesignProps> = ({
           </div>
         )}
         <div className="w-12 h-px mb-6" style={{ backgroundColor: colors.primary }} />
-        <div className="text-xs font-medium tracking-[0.5em] uppercase mb-5 text-gray-400">
+        <div
+          className="text-xs font-medium tracking-[0.5em] uppercase mb-5"
+          style={{ color: textColor, opacity: 0.55 }}
+        >
           {period}
         </div>
         <h1 className="text-6xl font-black leading-tight mb-5" style={{ color: textColor }}>
@@ -603,7 +617,8 @@ export const MinimalistAsymmetricTemplate: React.FC<CoverDesignProps> = ({
   fontFamily,
   fontColor,
 }) => {
-  const textColor = fontColor || colors.primary;
+  // Auto-contrast: if primary is too light for #fafafa bg, fall back to dark text
+  const textColor = fontColor || ensureTextContrast(colors.primary, '#fafafa');
   return (
     <div
       className="relative w-full h-full overflow-hidden"
@@ -642,7 +657,7 @@ export const MinimalistAsymmetricTemplate: React.FC<CoverDesignProps> = ({
         )}
         <div
           className="text-xs font-bold tracking-[0.5em] uppercase mb-4"
-          style={{ color: colors.accent }}
+          style={{ color: fontColor || colors.accent }}
         >
           {period}
         </div>
@@ -728,7 +743,7 @@ export const MinimalistFrameTemplate: React.FC<CoverDesignProps> = ({
         )}
         <div
           className="text-[10px] font-semibold tracking-[0.6em] uppercase mb-6"
-          style={{ color: colors.secondary }}
+          style={{ color: fontColor || colors.secondary }}
         >
           {period}
         </div>

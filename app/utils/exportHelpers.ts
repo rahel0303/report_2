@@ -173,7 +173,7 @@ export const handleDownload = async (
             try {
               await new Promise((resolve) => setTimeout(resolve, 500));
 
-              // Capture background only: hide the content layer ([data-cover-content])
+              // Screenshot background only (hide content layer) + native editable text
               const bgImage = await toPng(exportDiv, {
                 cacheBust: true,
                 width: 1920,
@@ -197,12 +197,11 @@ export const handleDownload = async (
                 },
               });
 
-              // Use hybrid: screenshot bg + native editable text
               const { createCoverSlideHybrid } = await import('./pptxExporter');
-              createCoverSlideHybrid(pptx, config, bgImage);
+              await createCoverSlideHybrid(pptx, config, bgImage);
               console.log(`✅ Cover slide captured (hybrid: bg screenshot + editable text)`);
             } catch (error) {
-              console.error('Cover hybrid export failed, falling back to native:', error);
+              console.error('Cover export failed, falling back to native:', error);
               const { createCoverSlide } = await import('./pptxExporter');
               createCoverSlide(pptx, config);
             }
@@ -225,34 +224,49 @@ export const handleDownload = async (
             try {
               await new Promise((resolve) => setTimeout(resolve, 500));
 
-              const bgImage = await toPng(exportDiv, {
-                cacheBust: true,
-                width: 1920,
-                height: 1080,
-                pixelRatio: 2,
-                filter: (node) => {
-                  if (node instanceof HTMLElement && node.hasAttribute('data-cover-content')) {
-                    return false;
-                  }
-                  if (node.nodeName === 'SCRIPT' || node.nodeName === 'NOSCRIPT') return false;
-                  return true;
-                },
-                style: {
-                  transform: 'scale(1)',
-                  transformOrigin: 'top left',
-                  position: 'relative',
-                  left: '0',
-                  top: '0',
-                  margin: '0',
-                  padding: '0',
-                },
-              });
+              // Clone into isolated container, hide title/decorations, screenshot bg only,
+              // then overlay native editable title (hybrid approach for all templates).
+              const isolatedWrapper = document.createElement('div');
+              isolatedWrapper.style.cssText =
+                'position:fixed;top:0;left:0;width:1920px;height:1080px;overflow:hidden;z-index:99999;pointer-events:none;';
+              const clone = exportDiv.cloneNode(true) as HTMLElement;
+              clone.style.position = 'relative';
+              clone.style.left = '0';
+              clone.style.top = '0';
+              clone.style.transform = 'scale(1)';
+              clone.style.transformOrigin = 'top left';
+              clone.style.margin = '0';
+              clone.style.padding = '0';
+              // Hide title + all decorative elements (re-added as native PPT text/shapes)
+              clone
+                .querySelectorAll('[data-section-title], [data-section-decoration]')
+                .forEach((el) => {
+                  (el as HTMLElement).style.visibility = 'hidden';
+                });
+              isolatedWrapper.appendChild(clone);
+              document.body.appendChild(isolatedWrapper);
+
+              let bgImage: string;
+              try {
+                bgImage = await toPng(clone, {
+                  cacheBust: true,
+                  width: 1920,
+                  height: 1080,
+                  pixelRatio: 2,
+                  filter: (node) => {
+                    if (node.nodeName === 'SCRIPT' || node.nodeName === 'NOSCRIPT') return false;
+                    return true;
+                  },
+                });
+              } finally {
+                document.body.removeChild(isolatedWrapper);
+              }
 
               const { createSectionHeadingSlideHybrid } = await import('./pptxExporter');
-              createSectionHeadingSlideHybrid(pptx, config, bgImage, sectionTitle);
+              await createSectionHeadingSlideHybrid(pptx, config, bgImage, sectionTitle);
               console.log(`✅ Section heading captured (hybrid: bg screenshot + editable text)`);
             } catch (error) {
-              console.error('Section heading hybrid export failed, falling back to native:', error);
+              console.error('Section heading export failed, falling back to native:', error);
               const { createSectionHeadingSlide } = await import('./pptxExporter');
               createSectionHeadingSlide(pptx, config, sectionTitle);
             }

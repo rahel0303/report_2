@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Sun, Moon } from 'lucide-react';
 import {
@@ -15,9 +15,15 @@ import {
   MinimalistFrameTemplate,
 } from './CoverTemplates';
 import { CoverTemplate, LogoAnalysis } from '@/app/types/cover';
-import { extractColorsFromImage } from '@/app/utils/colorExtractor';
+import { ReportConfig } from '@/app/types';
+import { extractColorsFromImage, hexLuminance } from '@/app/utils/colorExtractor';
+import { SectionHeadingSlide } from '@/app/components/slides/SectionHeadingSlide';
 import { MiniTemplatePreview } from './MiniTemplatePreview';
-import type { ContentMode } from '@/app/utils/themeStyles';
+import {
+  generateLayoutTheme,
+  getDecorativeStyles,
+  type ContentMode,
+} from '@/app/utils/themeStyles';
 
 interface CoverTemplateWithCategory extends CoverTemplate {
   category: 'modern' | 'geometric' | 'minimalist';
@@ -115,12 +121,19 @@ interface CoverDesignerProps {
   fontFamily?: string;
 }
 
-/** Auto-derive a sensible font color based on template background */
-function getAutoFontColor(templateId: number | null): string {
+/** Auto-derive a sensible font color based on template background and primary color */
+function getAutoFontColor(templateId: number | null, primaryColor?: string): string {
   if (!templateId) return '#ffffff';
-  // Light-background templates: 2(white card), 5, 7, 8, 9
-  const lightBg = new Set([2, 5, 7, 8, 9]);
-  return lightBg.has(templateId) ? '#111111' : '#ffffff';
+  // Templates with truly dark backgrounds — always white text
+  const alwaysDark = new Set([1, 4]);
+  if (alwaysDark.has(templateId)) return '#ffffff';
+  // Light-background templates — always dark text
+  const alwaysLight = new Set([2, 9]);
+  if (alwaysLight.has(templateId)) return '#111111';
+  // Templates 3 & 6: gradient from primaryColor — infer from luminance
+  // Templates 5, 7, 8: white/fafafa bg with primary-colored text — infer from luminance
+  const lum = hexLuminance(primaryColor || '#3B82F6');
+  return lum > 0.35 ? '#111111' : '#ffffff';
 }
 
 export const CoverDesigner: React.FC<CoverDesignerProps> = ({
@@ -141,12 +154,13 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
   const [fontColor, setFontColor] = useState<string>('#ffffff');
   const [fontColorAuto, setFontColorAuto] = useState(true);
 
-  // Auto-update fontColor whenever template selection changes (if auto mode)
+  // Auto-update fontColor whenever template or primary color changes (if auto mode)
+  const primaryColor = analysis?.colorPalette?.primary;
   useEffect(() => {
     if (fontColorAuto) {
-      setFontColor(getAutoFontColor(selectedTemplate));
+      setFontColor(getAutoFontColor(selectedTemplate, primaryColor));
     }
-  }, [selectedTemplate, fontColorAuto]);
+  }, [selectedTemplate, fontColorAuto, primaryColor]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -454,7 +468,7 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
                         onClick={() => {
                           setFontColorAuto((v) => {
                             const next = !v;
-                            if (next) setFontColor(getAutoFontColor(selectedTemplate));
+                            if (next) setFontColor(getAutoFontColor(selectedTemplate, primaryColor));
                             return next;
                           });
                         }}
@@ -521,7 +535,7 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
                     onClick={() => {
                       setFontColorAuto((v) => {
                         const next = !v;
-                        if (next) setFontColor(getAutoFontColor(selectedTemplate));
+                        if (next) setFontColor(getAutoFontColor(selectedTemplate, primaryColor));
                         return next;
                       });
                     }}
@@ -733,15 +747,42 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
                 );
               })}
 
-              {/* Large Preview */}
+              {/* Stacked Preview: Cover on top, Section Heading below */}
               {selectedTemplate && (
-                <div className="mt-6">
-                  <h3 className="text-lg font-semibold mb-3">Cover Preview</h3>
-                  <div
-                    key={`preview-${selectedTemplate}-${analysis?.colorPalette?.primary || 'default'}`}
-                    className="aspect-video rounded-lg overflow-hidden shadow-xl"
-                  >
-                    {getTemplateComponent(selectedTemplate)}
+                <div className="mt-6 space-y-4">
+                  {/* Cover */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-500 mb-2">Cover Preview</h3>
+                    <div
+                      key={`preview-${selectedTemplate}-${fontColor}-${analysis?.colorPalette?.primary || 'default'}`}
+                      className="aspect-video rounded-lg overflow-hidden shadow-xl"
+                    >
+                      {getTemplateComponent(selectedTemplate)}
+                    </div>
+                  </div>
+                  {/* Section Heading */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-500 mb-2">
+                      Section Heading Preview
+                    </h3>
+                    <div
+                      key={`section-${selectedTemplate}-${contentMode}-${fontColor}-${analysis?.colorPalette?.primary || 'default'}`}
+                      className="aspect-video rounded-lg overflow-hidden shadow-xl"
+                    >
+                      <SectionHeadingPreview
+                        colors={
+                          analysis?.colorPalette || {
+                            primary: '#3B82F6',
+                            secondary: '#8B5CF6',
+                            accent: '#EC4899',
+                          }
+                        }
+                        mode={contentMode}
+                        fontFamily={fontFamily}
+                        templateId={selectedTemplate}
+                        fontColor={fontColor}
+                      />
+                    </div>
                   </div>
                 </div>
               )}
@@ -974,6 +1015,78 @@ const ContentThemePreview: React.FC<ContentThemePreviewProps> = ({ colors, mode,
         <span className="text-[8px] font-bold" style={{ color: colors.primary }}>
           Sekata
         </span>
+      </div>
+    </div>
+  );
+};
+
+// Section Heading Preview Component — renders the actual SectionHeadingSlide scaled to fit
+interface SectionHeadingPreviewProps {
+  colors: { primary: string; secondary: string; accent: string };
+  mode: ContentMode;
+  fontFamily: string;
+  templateId: number;
+  fontColor?: string;
+}
+
+const SectionHeadingPreview: React.FC<SectionHeadingPreviewProps> = ({
+  colors,
+  mode,
+  fontFamily,
+  templateId,
+  fontColor,
+}) => {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(0.5);
+
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const update = () => setScale(el.offsetWidth / 1280);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Minimal ReportConfig so SectionHeadingSlide can render
+  const mockConfig: ReportConfig = {
+    reportTitle: '',
+    reportDetails: '',
+    preparedBy: '',
+    reportType: 'Monthly',
+    period: '',
+    clientName: '',
+    selectedCompetitors: [],
+    theme: {
+      id: 'section-preview',
+      name: 'Preview',
+      type: mode === 'dark' ? 'dark' : 'light',
+      colors: [colors.primary, colors.secondary, colors.accent],
+      brandColor: colors.primary,
+      textColor: mode === 'dark' ? '#ffffff' : '#1e293b',
+    },
+    font: { id: 'preview', name: fontFamily },
+    coverDesign: {
+      templateId,
+      logoData: '',
+      colors,
+      contentMode: mode,
+      fontColor,
+    },
+  };
+
+  return (
+    <div ref={wrapperRef} className="w-full overflow-hidden" style={{ aspectRatio: '16/9' }}>
+      <div
+        style={{
+          width: '1280px',
+          height: '720px',
+          transformOrigin: 'top left',
+          transform: `scale(${scale})`,
+        }}
+      >
+        <SectionHeadingSlide config={mockConfig} title="Section Title" isExport />
       </div>
     </div>
   );

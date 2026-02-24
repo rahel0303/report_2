@@ -1,5 +1,6 @@
 ﻿import PptxGenJS from 'pptxgenjs';
 import { ReportConfig, Slide } from '@/app/types';
+import { hexLuminance } from '@/app/utils/colorExtractor';
 
 // Re-export for backwards compatibility
 export type SlideData = Slide;
@@ -404,23 +405,27 @@ function drawSlideInsight(
  * All 9 templates supported. fontColorOverride takes precedence over auto-detect.
  */
 function getCoverTextStyle(templateId: number, primaryColor: string, fontColorOverride?: string) {
-  // Light-background templates (2=white card, 5,7,8,9=white bg)
+  // Templates 3 & 6 use a gradient from primaryColor — treat as light if primary is light
+  const gradientIsLight = hexLuminance(primaryColor) > 0.35;
+  // Light-background templates (2=white card, 5,7,8,9=white bg; 3/6 dynamic)
   const lightBgSet = new Set([2, 5, 7, 8, 9]);
-  const isLightBg = lightBgSet.has(templateId);
-  const leftAlignedSet = new Set([4, 5, 8]);
+  const isLightBg =
+    lightBgSet.has(templateId) || ((templateId === 3 || templateId === 6) && gradientIsLight);
+  const leftAlignedSet = new Set([2, 4, 5, 8]);
   const isLeftAligned = leftAlignedSet.has(templateId);
 
-  // Auto title color per template
+  // Auto title color per template — dark bg → white, light bg → dark
+  // Templates 3 & 6: gradient from primary → use gradientIsLight computed above.
   const autoTitleColors: Record<number, string> = {
-    1: 'FFFFFF',
-    2: '0f0f14',
-    3: 'FFFFFF',
-    4: 'FFFFFF',
-    5: cleanColor(primaryColor),
-    6: 'FFFFFF',
-    7: cleanColor(primaryColor),
-    8: cleanColor(primaryColor),
-    9: '111111',
+    1: 'FFFFFF', // Neon Pulse — dark bg
+    2: '111111', // Bold Split — white card
+    3: gradientIsLight ? '111111' : 'FFFFFF', // Glass Morphism — gradient from primary
+    4: 'FFFFFF', // Prism — dark bg
+    5: '111111', // Bauhaus — white bg
+    6: gradientIsLight ? '111111' : 'FFFFFF', // Hexagon Mesh — gradient from primary
+    7: '111111', // Clean Line — white bg
+    8: '111111', // Asymmetric — light bg
+    9: '111111', // Nordic Frame — white bg
   };
 
   const titleColor = fontColorOverride
@@ -462,30 +467,53 @@ function getCoverTextStyle(templateId: number, primaryColor: string, fontColorOv
   let logoX = -1; // -1 = auto-center
 
   switch (templateId) {
+    case 1: // Neon Pulse — period ABOVE title (matches web layout)
+      titleY = 1.9;
+      titleH = 1.3;
+      subtitleY = 3.15;
+      periodY = 1.44; // sits just above the title
+      footerY = 5.0;
+      titleSize = 44;
+      // Slightly more muted subtitle & period so they don’t compete with the title
+      subtitleSize = 18;
+      break;
     case 2: // Bold Split — content on white card starting at 30%
       xOffset = 3.1;
       textWidth = 6.4;
-      titleY = 2.0;
-      titleH = 1.3;
-      subtitleY = 3.35;
-      periodY = 3.95;
-      footerY = 5.0;
+      titleY = 2.2;
+      titleH = 1.1;
+      subtitleY = 3.4;
+      periodY = 3.85;
+      footerY = 5.1;
       titleSize = 36;
       subtitleSize = 18;
       logoX = 3.2;
-      logoY = 0.7;
+      logoY = 1.35;
       break;
-    case 4: // Prism — content bottom-left, period above title
+    case 3: // Glass Morphism — centered, period ABOVE title, all white on gradient
       xOffset = 0.5;
-      textWidth = 8;
-      titleY = 3.0;
-      titleH = 1.4;
-      subtitleY = 4.5;
-      periodY = 2.4;
-      footerY = 5.5;
-      titleSize = 48;
-      logoX = 0.7;
-      logoY = 2.1;
+      textWidth = 9;
+      titleY = 2.1;
+      titleH = 1.2;
+      subtitleY = 3.4;
+      periodY = 1.62; // above title
+      footerY = 5.1;
+      titleSize = 44;
+      subtitleSize = 20;
+      logoX = -1; // auto-center
+      logoY = 0.85;
+      break;
+    case 4: // Prism — bottom-left: logo → period → title → subtitle (justify-end)
+      xOffset = 0.5;
+      textWidth = 8.5;
+      titleY = 3.7; // dynamically overridden from logoBottomY
+      titleH = 0.8;
+      subtitleY = 4.68; // dynamically overridden
+      periodY = 3.42; // dynamically overridden — placed BELOW logo
+      footerY = 5.18;
+      titleSize = 44;
+      logoX = 0.5;
+      logoY = 2.7; // upper bottom-third so content has room below
       break;
     case 5: // Bauhaus — left-aligned
       xOffset = 1.8;
@@ -554,11 +582,76 @@ function getCoverTextStyle(templateId: number, primaryColor: string, fontColorOv
 }
 
 /**
+ * Load a logo data-URL onto a canvas, apply rounded corners, and return a new PNG data-URL.
+ * Also returns the aspect-ratio-correct PPT dimensions (inches) constrained to maxW × maxH.
+ */
+async function prepareLogoImage(
+  logoData: string,
+  maxW: number,
+  maxH: number,
+  radiusFraction = 0.12,
+): Promise<{ data: string; w: number; h: number }> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const natW = img.naturalWidth || img.width;
+      const natH = img.naturalHeight || img.height;
+      const aspect = natW / natH;
+
+      // Compute dimensions that fit maxW × maxH while keeping aspect ratio
+      let pptW = maxW;
+      let pptH = pptW / aspect;
+      if (pptH > maxH) {
+        pptH = maxH;
+        pptW = pptH * aspect;
+      }
+
+      // Render at 2× for crispness
+      const canvasW = Math.round(pptW * 192);
+      const canvasH = Math.round(pptH * 192);
+      const radius = Math.round(Math.min(canvasW, canvasH) * radiusFraction);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = canvasW;
+      canvas.height = canvasH;
+      const ctx = canvas.getContext('2d')!;
+
+      // Rounded clip
+      ctx.beginPath();
+      ctx.moveTo(radius, 0);
+      ctx.lineTo(canvasW - radius, 0);
+      ctx.quadraticCurveTo(canvasW, 0, canvasW, radius);
+      ctx.lineTo(canvasW, canvasH - radius);
+      ctx.quadraticCurveTo(canvasW, canvasH, canvasW - radius, canvasH);
+      ctx.lineTo(radius, canvasH);
+      ctx.quadraticCurveTo(0, canvasH, 0, canvasH - radius);
+      ctx.lineTo(0, radius);
+      ctx.quadraticCurveTo(0, 0, radius, 0);
+      ctx.closePath();
+      ctx.clip();
+
+      ctx.drawImage(img, 0, 0, canvasW, canvasH);
+
+      resolve({ data: canvas.toDataURL('image/png'), w: pptW, h: pptH });
+    };
+    img.onerror = () => {
+      // Fallback: return original, square dimensions
+      resolve({ data: logoData, w: maxW, h: maxH });
+    };
+    img.src = logoData;
+  });
+}
+
+/**
  * Create a cover slide using a screenshot background + native editable text.
  * Called from exportHelpers with the captured background image.
  * Supports all 9 cover templates with correct text color/position per template.
  */
-export function createCoverSlideHybrid(pptx: PptxGenJS, config: ReportConfig, bgImageData: string) {
+export async function createCoverSlideHybrid(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  bgImageData: string,
+) {
   const slide = pptx.addSlide();
   const font = config.font?.name || 'Inter';
   const templateId = Number(config.coverDesign?.templateId || 1);
@@ -573,30 +666,108 @@ export function createCoverSlideHybrid(pptx: PptxGenJS, config: ReportConfig, bg
     h: '100%',
   });
 
+  // Template 4 (Prism): SVG now uses viewBox + absolute coords so the background
+  // screenshot captures the triangles correctly. Re-add only the diamond decorations
+  // that were inside data-cover-content (hidden during screenshot).
+  if (templateId === 4) {
+    // Diamond outer ring
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 9.5,
+      y: 0.167,
+      w: 0.333,
+      h: 0.333,
+      rotate: 45,
+      fill: { type: 'none' },
+      line: { color: 'FFFFFF', width: 0.75, transparency: 80 },
+    });
+    // Inner small diamond
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 9.545,
+      y: 0.333,
+      w: 0.125,
+      h: 0.125,
+      rotate: 45,
+      fill: { color: 'FFFFFF', transparency: 90 },
+      line: { type: 'none' },
+    });
+  }
+
   const s = getCoverTextStyle(
     templateId,
     config.coverDesign?.colors?.primary || '#3B82F6',
     fontColorOverride,
   );
 
-  // Logo — position determined per template
+  // Logo — correct aspect ratio + border radius via canvas
+  // Template 2: cap logo smaller so text block stays centered in white card
+  let logoBottomY = s.logoY; // fallback if no logo
   if (config.coverDesign?.logoData) {
-    const logoSize = 1.1;
-    const logoX = s.logoX >= 0 ? s.logoX : (10 - logoSize) / 2;
+    const maxLogoW = templateId === 2 ? 1.5 : templateId === 3 ? 1.6 : templateId === 4 ? 1.8 : 2.2;
+    const maxLogoH =
+      templateId === 2 ? 0.65 : templateId === 3 ? 0.65 : templateId === 4 ? 0.6 : 1.1;
+    const logo = await prepareLogoImage(config.coverDesign.logoData, maxLogoW, maxLogoH, 0.1);
+    const logoX = s.logoX >= 0 ? s.logoX : (10 - logo.w) / 2;
+    logoBottomY = s.logoY + logo.h;
     slide.addImage({
-      data: config.coverDesign.logoData,
+      data: logo.data,
       x: logoX,
       y: s.logoY,
-      w: logoSize,
-      h: logoSize,
-      sizing: { type: 'contain', w: logoSize, h: logoSize },
+      w: logo.w,
+      h: logo.h,
     });
+  }
+
+  // Template 2 (Bold Split): accent bar RIGHT below logo, then text flows from there
+  const pc2 = cleanColor(
+    config.coverDesign?.colors?.primary || config.theme?.brandColor || '#3B82F6',
+  );
+  const sc2 = cleanColor(config.coverDesign?.colors?.secondary || '#10B981');
+
+  let dynTitleY = s.titleY;
+  let dynSubtitleY = s.subtitleY;
+  let dynPeriodY = s.periodY;
+  let dynFooterY = s.footerY;
+
+  if (templateId === 2) {
+    const barY = logoBottomY + 0.16; // tight gap between logo bottom and accent bar
+    slide.addShape(pptx.ShapeType.rect, {
+      x: s.xOffset,
+      y: barY,
+      w: 0.26,
+      h: 0.022,
+      fill: { color: pc2 },
+      line: { type: 'none' },
+    });
+    dynTitleY = barY + 0.2;
+    dynSubtitleY = dynTitleY + s.titleH + 0.16;
+    dynPeriodY = dynSubtitleY + 0.55;
+    dynFooterY = 5.15; // pinned to very bottom of slide
+  }
+
+  // Template 4 (Prism): anchor from bottom up so nothing overlaps regardless of logo size.
+  // Footer → subtitle → title → period, logo placed at static logoY above the block.
+  if (templateId === 4) {
+    dynFooterY = 5.18;
+    dynSubtitleY = dynFooterY - 0.48; // subtitle ends just above footer
+    dynTitleY = dynSubtitleY - s.titleH - 0.1; // title block sits above subtitle
+    dynPeriodY = dynTitleY - 0.24; // period row sits above title
+  }
+
+  // Minimalist templates (7=Clean Line, 8=Asymmetric, 9=Nordic Frame):
+  // Same bottom-up anchoring — footer → subtitle → title → period (above title).
+  // Logo stays pinned at static logoY (top area). Guarantees no overlap regardless
+  // of logo height or title length.
+  if (templateId === 7 || templateId === 8 || templateId === 9) {
+    dynFooterY = s.footerY;
+    dynSubtitleY = dynFooterY - 1.2; // subtitle box ends just above footer
+    dynTitleY = dynSubtitleY - s.titleH - 0.4; // title block above subtitle
+    dynPeriodY = dynTitleY - 0.3; // period row sits above title
   }
 
   // Title
   slide.addText(config.reportTitle, {
     x: s.xOffset,
-    y: s.titleY,
+    y: dynTitleY,
     w: s.textWidth,
     h: s.titleH,
     fontSize: s.titleSize,
@@ -607,42 +778,161 @@ export function createCoverSlideHybrid(pptx: PptxGenJS, config: ReportConfig, bg
     fontFace: font,
   });
 
-  // Subtitle
+  // Subtitle — template 2: secondary color matches web (`fontColor || colors.secondary`)
   if (config.reportDetails) {
     slide.addText(config.reportDetails, {
       x: s.xOffset,
-      y: s.subtitleY,
+      y: dynSubtitleY,
       w: s.textWidth,
       h: 0.6,
       fontSize: s.subtitleSize,
-      color: s.subtitleColor,
-      transparency: s.subtitleTransparency,
+      color:
+        templateId === 2
+          ? fontColorOverride
+            ? cleanColor(fontColorOverride)
+            : sc2
+          : s.subtitleColor,
+      transparency: templateId === 1 ? 35 : templateId === 3 ? 25 : s.subtitleTransparency,
       align: s.align,
       valign: 'middle',
       fontFace: font,
     });
   }
 
-  // Period
+  // Period — template 2: muted gray matches web (`fontColor || '#999'` at opacity 0.7)
   if (config.period) {
     slide.addText(config.period, {
       x: s.xOffset,
-      y: s.periodY,
+      y: dynPeriodY,
       w: s.textWidth,
       h: 0.5,
-      fontSize: 16,
-      color: s.periodColor,
-      transparency: s.periodTransparency,
+      fontSize: templateId === 1 ? 13 : 12,
+      color:
+        templateId === 2
+          ? fontColorOverride
+            ? cleanColor(fontColorOverride)
+            : '999999'
+          : s.periodColor,
+      transparency:
+        templateId === 1
+          ? 30
+          : templateId === 2
+            ? 30
+            : templateId === 3
+              ? 30
+              : templateId === 4
+                ? 40
+                : s.periodTransparency,
       align: s.align,
       valign: 'middle',
       fontFace: font,
+      ...(templateId === 1 ? { charSpacing: 4, bold: true } : {}),
+      ...(templateId === 2 ? { charSpacing: 3, bold: true } : {}),
+      ...(templateId === 3 ? { charSpacing: 4, bold: true } : {}),
+      ...(templateId === 4 ? { charSpacing: 4, bold: true } : {}),
+      ...(templateId === 7 ? { charSpacing: 4 } : {}),
+      ...(templateId === 8 ? { charSpacing: 4, bold: true } : {}),
+      ...(templateId === 9 ? { charSpacing: 5 } : {}),
+    });
+  }
+
+  // Template 3 (Glass Morphism): 3 white dots below subtitle
+  if (templateId === 3) {
+    const dotR = 0.07;
+    const dotGap = 0.07;
+    const totalDotsW = 3 * dotR + 2 * dotGap;
+    const dotsStartX = (10 - totalDotsW) / 2;
+    const dotsY = dynSubtitleY + 0.65;
+    [0, 1, 2].forEach((i) => {
+      slide.addShape(pptx.ShapeType.ellipse, {
+        x: dotsStartX + i * (dotR + dotGap),
+        y: dotsY,
+        w: dotR,
+        h: dotR,
+        fill: { color: 'FFFFFF', transparency: 40 },
+        line: { type: 'none' },
+      });
+    });
+  }
+
+  // Template 7 (Clean Line): two thin horizontal lines from data-cover-content
+  // Line 1: above the period text (color = primary)
+  // Line 2: between title bottom and subtitle (color = accent)
+  if (templateId === 7) {
+    const lineW = 0.5; // w-12 = 48px ≈ 0.5"
+    const lineH = 0.013; // h-px = 1px ≈ 0.013"
+    const lineX = (10 - lineW) / 2;
+    const pc7 = cleanColor(
+      config.coverDesign?.colors?.primary || config.theme?.brandColor || '#3B82F6',
+    );
+    const ac7 = cleanColor(
+      config.coverDesign?.colors?.accent || config.coverDesign?.colors?.secondary || pc7,
+    );
+    // Line above period
+    slide.addShape(pptx.ShapeType.rect, {
+      x: lineX,
+      y: dynPeriodY - 0.14,
+      w: lineW,
+      h: lineH,
+      fill: { color: pc7 },
+      line: { type: 'none' },
+    });
+    // Line between title and subtitle
+    slide.addShape(pptx.ShapeType.rect, {
+      x: lineX,
+      y: dynTitleY + s.titleH + 0.1,
+      w: lineW,
+      h: lineH,
+      fill: { color: ac7 },
+      line: { type: 'none' },
+    });
+  }
+
+  // Template 9 (Nordic Frame): three stepped color bars below subtitle (inside data-cover-content)
+  // Placed just above the footer so they don't overlap.
+  if (templateId === 9) {
+    const barsY = dynFooterY - 0.28;
+    const barsH = 0.04;
+    const pc9 = cleanColor(
+      config.coverDesign?.colors?.primary || config.theme?.brandColor || '#3B82F6',
+    );
+    const sc9 = cleanColor(config.coverDesign?.colors?.secondary || pc9);
+    const ac9 = cleanColor(config.coverDesign?.colors?.accent || pc9);
+    const totalBarsW = 0.5 + 0.04 + 0.25 + 0.04 + 0.125; // gaps between bars
+    const barsStartX = (10 - totalBarsW) / 2;
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: barsStartX,
+      y: barsY,
+      w: 0.5,
+      h: barsH,
+      rectRadius: 0.02,
+      fill: { color: pc9 },
+      line: { type: 'none' },
+    });
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: barsStartX + 0.5 + 0.04,
+      y: barsY,
+      w: 0.25,
+      h: barsH,
+      rectRadius: 0.02,
+      fill: { color: sc9 },
+      line: { type: 'none' },
+    });
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: barsStartX + 0.5 + 0.04 + 0.25 + 0.04,
+      y: barsY,
+      w: 0.125,
+      h: barsH,
+      rectRadius: 0.02,
+      fill: { color: ac9 },
+      line: { type: 'none' },
     });
   }
 
   // Prepared by footer
   slide.addText(`Prepared by: ${config.preparedBy}`, {
     x: s.xOffset,
-    y: s.footerY,
+    y: dynFooterY,
     w: s.textWidth,
     h: 0.3,
     fontSize: 10,
@@ -726,7 +1016,7 @@ export function createCoverSlide(pptx: PptxGenJS, config: ReportConfig) {
 /**
  * Create a section heading slide using a screenshot background + native editable text.
  */
-export function createSectionHeadingSlideHybrid(
+export async function createSectionHeadingSlideHybrid(
   pptx: PptxGenJS,
   config: ReportConfig,
   bgImageData: string,
@@ -734,8 +1024,15 @@ export function createSectionHeadingSlideHybrid(
 ) {
   const slide = pptx.addSlide();
   const font = config.font?.name || 'Inter';
+  const templateId = Number(config.coverDesign?.templateId || 1);
+  const primaryColor = config.coverDesign?.colors?.primary || config.theme?.brandColor || '3B82F6';
+  const fontColorOverride = config.coverDesign?.fontColor;
+
+  // Get per-template text style (color, alignment, position, size)
+  const s = getCoverTextStyle(templateId, primaryColor, fontColorOverride);
 
   // Background: pixel-perfect screenshot (gradients, shapes, decorative elements)
+  // The title was hidden during capture so only decorations appear here
   slide.addImage({
     data: bgImageData,
     x: 0,
@@ -744,18 +1041,490 @@ export function createSectionHeadingSlideHybrid(
     h: '100%',
   });
 
-  // Section title – centered, white, large
+  // Template 4 (Prism): SVG now uses viewBox + absolute coords so the background
+  // screenshot captures the triangles correctly. No extra canvas drawing needed.
+
+  // Section title – position / color / alignment driven by template
+  // Bold Split (template 2) title sits in the right panel matching cover layout.
+  // All other templates: compact centered layout with native decorations.
+  // Use explicit centered y-values (not s.titleY) so content sits at slide midpoint.
+  let titleY: number;
+  let titleH: number;
+  if (templateId === 2) {
+    titleY = 2.4; // (5.625 - block_h) / 2: bar(0.02)+gap(0.18)+title(0.9)+gap(0.18)+dots ≈ centered
+    titleH = 0.9;
+  } else {
+    titleY = 2.4; // template 1: SECTION(0.22)+gap+bar+gap+title(0.9)+dots ≈ centered
+    titleH = 0.9;
+  }
+
+  // ── Template 3 (Glass Morphism): SECTION label + white bar above, 3 dots below
+  if (templateId === 3) {
+    // "SECTION" label above the bar
+    slide.addText('SECTION', {
+      x: 0.5,
+      y: titleY - 0.44,
+      w: 9,
+      h: 0.22,
+      fontSize: 9,
+      bold: true,
+      color: 'FFFFFF',
+      transparency: 30,
+      align: 'center',
+      valign: 'middle',
+      charSpacing: 4,
+      fontFace: font,
+    });
+    // White bar between label and title
+    slide.addShape(pptx.ShapeType.rect, {
+      x: (10 - 0.29) / 2,
+      y: titleY - 0.18,
+      w: 0.29,
+      h: 0.022,
+      fill: { color: 'FFFFFF', transparency: 30 },
+      line: { type: 'none' },
+    });
+    // 3 white dots below title
+    const dotR = 0.07;
+    const dotGap = 0.07;
+    const totalDotsW = 3 * dotR + 2 * dotGap;
+    const dotsStartX = (10 - totalDotsW) / 2;
+    const dotsY = titleY + titleH + 0.2;
+    [0, 1, 2].forEach((i) => {
+      slide.addShape(pptx.ShapeType.ellipse, {
+        x: dotsStartX + i * (dotR + dotGap),
+        y: dotsY,
+        w: dotR,
+        h: dotR,
+        fill: { color: 'FFFFFF', transparency: 40 },
+        line: { type: 'none' },
+      });
+    });
+  }
+
+  // ── Template 2 (Bold Split): accent bar above title + dot row below title
+  if (templateId === 2) {
+    const pc = cleanColor(primaryColor);
+    const ac = cleanColor(
+      config.coverDesign?.colors?.accent || config.coverDesign?.colors?.secondary || primaryColor,
+    );
+    const sc = cleanColor(config.coverDesign?.colors?.secondary || primaryColor);
+
+    // Orange accent bar above section title
+    slide.addShape(pptx.ShapeType.rect, {
+      x: s.xOffset,
+      y: titleY - 0.18,
+      w: 0.26,
+      h: 0.022,
+      fill: { color: pc },
+      line: { type: 'none' },
+    });
+
+    // Bottom dot row: left bar + center dot + right bar
+    const rowY = titleY + titleH + 0.16;
+    const leftBarW = 0.27;
+    const dotW = 0.06;
+    const rightBarW = 0.15;
+    const gap = 0.06;
+    const rowStartX = s.xOffset;
+
+    slide.addShape(pptx.ShapeType.rect, {
+      x: rowStartX,
+      y: rowY + 0.06,
+      w: leftBarW,
+      h: 0.018,
+      fill: { color: pc },
+      line: { type: 'none' },
+    });
+    slide.addShape(pptx.ShapeType.ellipse, {
+      x: rowStartX + leftBarW + gap,
+      y: rowY + 0.04,
+      w: dotW,
+      h: dotW,
+      fill: { color: ac },
+      line: { type: 'none' },
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: rowStartX + leftBarW + gap + dotW + gap,
+      y: rowY + 0.06,
+      w: rightBarW,
+      h: 0.018,
+      fill: { color: sc },
+      line: { type: 'none' },
+    });
+  }
+
+  // ── Template 1 (Neon Pulse): add native decorations (SECTION label, accent bar, dot row)
+  if (templateId === 1) {
+    const pc = cleanColor(primaryColor);
+    const ac = cleanColor(
+      config.coverDesign?.colors?.accent || config.coverDesign?.colors?.secondary || primaryColor,
+    );
+
+    // "SECTION" label — small tracked uppercase, above title
+    slide.addText('SECTION', {
+      x: 0.5,
+      y: titleY - 0.42,
+      w: 9,
+      h: 0.22,
+      fontSize: 9,
+      bold: true,
+      color: 'FFFFFF',
+      transparency: 45,
+      align: 'center',
+      valign: 'middle',
+      charSpacing: 5,
+      fontFace: font,
+    });
+
+    // Accent bar between label and title
+    slide.addShape(pptx.ShapeType.rect, {
+      x: (10 - 0.29) / 2, // centered
+      y: titleY - 0.16,
+      w: 0.29,
+      h: 0.025,
+      fill: { color: pc },
+      line: { type: 'none' },
+    });
+
+    // Bottom decorative row: left bar + center dot + right bar
+    const rowY = titleY + titleH + 0.14;
+    const rowCenterX = 5; // slide center
+    const leftBarW = 0.27;
+    const dotW = 0.06;
+    const rightBarW = 0.15;
+    const gap = 0.06;
+    const totalW = leftBarW + gap + dotW + gap + rightBarW;
+    const rowStartX = rowCenterX - totalW / 2;
+
+    slide.addShape(pptx.ShapeType.rect, {
+      x: rowStartX,
+      y: rowY + 0.07,
+      w: leftBarW,
+      h: 0.018,
+      fill: { color: pc },
+      line: { type: 'none' },
+    });
+    slide.addShape(pptx.ShapeType.ellipse, {
+      x: rowStartX + leftBarW + gap,
+      y: rowY + 0.05,
+      w: dotW,
+      h: dotW,
+      fill: { color: ac },
+      line: { type: 'none' },
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: rowStartX + leftBarW + gap + dotW + gap,
+      y: rowY + 0.07,
+      w: rightBarW,
+      h: 0.018,
+      fill: { color: pc },
+      line: { type: 'none' },
+    });
+  }
+
+  // ── Template 4 (Prism): SECTION label + gradient bar above, dot+bar below
+  if (templateId === 4) {
+    const pc = cleanColor(primaryColor);
+    const ac = cleanColor(
+      config.coverDesign?.colors?.accent || config.coverDesign?.colors?.secondary || primaryColor,
+    );
+    slide.addText('SECTION', {
+      x: 0.5,
+      y: titleY - 0.38,
+      w: 9,
+      h: 0.22,
+      fontSize: 9,
+      bold: true,
+      color: 'FFFFFF',
+      transparency: 40,
+      align: 'center',
+      valign: 'middle',
+      charSpacing: 5,
+      fontFace: font,
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: (10 - 0.27) / 2,
+      y: titleY - 0.14,
+      w: 0.27,
+      h: 0.022,
+      fill: { color: pc },
+      line: { type: 'none' },
+    });
+    const rowY4 = titleY + titleH + 0.18;
+    slide.addShape(pptx.ShapeType.rect, {
+      x: (10 - 0.54 - 0.06 - 0.06) / 2,
+      y: rowY4 + 0.06,
+      w: 0.27,
+      h: 0.018,
+      fill: { color: pc },
+      line: { type: 'none' },
+    });
+    slide.addShape(pptx.ShapeType.ellipse, {
+      x: (10 - 0.54 - 0.06 - 0.06) / 2 + 0.33,
+      y: rowY4 + 0.04,
+      w: 0.06,
+      h: 0.06,
+      fill: { color: ac },
+      line: { type: 'none' },
+    });
+  }
+
+  // ── Template 5 (Bauhaus): accent SECTION label + primary bar above, staggered bars below
+  if (templateId === 5) {
+    const pc = cleanColor(primaryColor);
+    const sc = cleanColor(config.coverDesign?.colors?.secondary || primaryColor);
+    const ac = cleanColor(config.coverDesign?.colors?.accent || primaryColor);
+    slide.addText('SECTION', {
+      x: 0.5,
+      y: titleY - 0.44,
+      w: 9,
+      h: 0.22,
+      fontSize: 9,
+      bold: true,
+      color: ac,
+      transparency: 0,
+      align: 'center',
+      valign: 'middle',
+      charSpacing: 5,
+      fontFace: font,
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: (10 - 0.25) / 2,
+      y: titleY - 0.18,
+      w: 0.25,
+      h: 0.022,
+      fill: { color: pc },
+      line: { type: 'none' },
+    });
+    const rowY5 = titleY + titleH + 0.2;
+    const b5x = (10 - (0.4 + 0.06 + 0.2 + 0.06 + 0.1)) / 2;
+    slide.addShape(pptx.ShapeType.rect, {
+      x: b5x,
+      y: rowY5 + 0.04,
+      w: 0.4,
+      h: 0.1,
+      fill: { color: pc },
+      line: { type: 'none' },
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: b5x + 0.46,
+      y: rowY5 + 0.04,
+      w: 0.2,
+      h: 0.1,
+      fill: { color: sc },
+      line: { type: 'none' },
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: b5x + 0.72,
+      y: rowY5 + 0.04,
+      w: 0.1,
+      h: 0.1,
+      fill: { color: ac },
+      line: { type: 'none' },
+    });
+  }
+
+  // ── Template 6 (Hexagon Mesh): SECTION label + white bar above, left-dot-right below
+  if (templateId === 6) {
+    slide.addText('SECTION', {
+      x: 0.5,
+      y: titleY - 0.44,
+      w: 9,
+      h: 0.22,
+      fontSize: 9,
+      bold: true,
+      color: 'FFFFFF',
+      transparency: 40,
+      align: 'center',
+      valign: 'middle',
+      charSpacing: 5,
+      fontFace: font,
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: (10 - 0.29) / 2,
+      y: titleY - 0.18,
+      w: 0.29,
+      h: 0.022,
+      fill: { color: 'FFFFFF', transparency: 30 },
+      line: { type: 'none' },
+    });
+    const rowY6 = titleY + titleH + 0.14;
+    const rW6 = 0.27,
+      dW6 = 0.06,
+      gap6 = 0.06;
+    const rx6 = (10 - (rW6 + gap6 + dW6 + gap6 + 0.15)) / 2;
+    slide.addShape(pptx.ShapeType.rect, {
+      x: rx6,
+      y: rowY6 + 0.07,
+      w: rW6,
+      h: 0.018,
+      fill: { color: 'FFFFFF', transparency: 30 },
+      line: { type: 'none' },
+    });
+    slide.addShape(pptx.ShapeType.ellipse, {
+      x: rx6 + rW6 + gap6,
+      y: rowY6 + 0.05,
+      w: dW6,
+      h: dW6,
+      fill: { color: 'FFFFFF', transparency: 50 },
+      line: { type: 'none' },
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: rx6 + rW6 + gap6 + dW6 + gap6,
+      y: rowY6 + 0.07,
+      w: 0.15,
+      h: 0.018,
+      fill: { color: 'FFFFFF', transparency: 65 },
+      line: { type: 'none' },
+    });
+  }
+
+  // ── Template 7 (Clean Line): primary bar + SECTION label above, accent bar below
+  if (templateId === 7) {
+    const pc = cleanColor(primaryColor);
+    const ac = cleanColor(config.coverDesign?.colors?.accent || primaryColor);
+    slide.addShape(pptx.ShapeType.rect, {
+      x: (10 - 0.48) / 2,
+      y: titleY - 0.52,
+      w: 0.48,
+      h: 0.005,
+      fill: { color: pc },
+      line: { type: 'none' },
+    });
+    slide.addText('SECTION', {
+      x: 0.5,
+      y: titleY - 0.42,
+      w: 9,
+      h: 0.22,
+      fontSize: 9,
+      color: pc,
+      transparency: 45,
+      align: 'center',
+      valign: 'middle',
+      charSpacing: 6,
+      fontFace: font,
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: (10 - 0.48) / 2,
+      y: titleY + titleH + 0.14,
+      w: 0.48,
+      h: 0.005,
+      fill: { color: ac },
+      line: { type: 'none' },
+    });
+  }
+
+  // ── Template 8 (Asymmetric): accent SECTION label above, gradient bar + dot below
+  if (templateId === 8) {
+    const pc = cleanColor(primaryColor);
+    const ac = cleanColor(config.coverDesign?.colors?.accent || primaryColor);
+    slide.addText('SECTION', {
+      x: 0.5,
+      y: titleY - 0.38,
+      w: 9,
+      h: 0.22,
+      fontSize: 9,
+      bold: true,
+      color: ac,
+      transparency: 0,
+      align: 'center',
+      valign: 'middle',
+      charSpacing: 6,
+      fontFace: font,
+    });
+    const rowY8 = titleY + titleH + 0.18;
+    slide.addShape(pptx.ShapeType.rect, {
+      x: (10 - 0.54 - 0.06 - 0.12) / 2,
+      y: rowY8 + 0.06,
+      w: 0.27,
+      h: 0.018,
+      fill: { color: pc },
+      line: { type: 'none' },
+    });
+    slide.addShape(pptx.ShapeType.ellipse, {
+      x: (10 - 0.54 - 0.06 - 0.12) / 2 + 0.33,
+      y: rowY8 + 0.04,
+      w: 0.06,
+      h: 0.06,
+      fill: { color: ac },
+      line: { type: 'none' },
+    });
+  }
+
+  // ── Template 9 (Nordic Frame): secondary SECTION label + thin line above, stepped bars below
+  if (templateId === 9) {
+    const pc = cleanColor(primaryColor);
+    const sc = cleanColor(config.coverDesign?.colors?.secondary || primaryColor);
+    const ac = cleanColor(config.coverDesign?.colors?.accent || primaryColor);
+    slide.addText('SECTION', {
+      x: 0.5,
+      y: titleY - 0.44,
+      w: 9,
+      h: 0.22,
+      fontSize: 9,
+      color: sc,
+      transparency: 0,
+      align: 'center',
+      valign: 'middle',
+      charSpacing: 7,
+      fontFace: font,
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: (10 - 0.24) / 2,
+      y: titleY - 0.16,
+      w: 0.24,
+      h: 0.005,
+      fill: { color: pc },
+      line: { type: 'none' },
+    });
+    const rowY9 = titleY + titleH + 0.18;
+    const b9x = (10 - (0.48 + 0.04 + 0.24 + 0.04 + 0.12)) / 2;
+    slide.addShape(pptx.ShapeType.rect, {
+      x: b9x,
+      y: rowY9,
+      w: 0.48,
+      h: 0.05,
+      fill: { color: pc },
+      line: { type: 'none' },
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: b9x + 0.52,
+      y: rowY9,
+      w: 0.24,
+      h: 0.05,
+      fill: { color: sc },
+      line: { type: 'none' },
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: b9x + 0.8,
+      y: rowY9,
+      w: 0.12,
+      h: 0.05,
+      fill: { color: ac },
+      line: { type: 'none' },
+    });
+  }
+
+  // Title color: white on dark bg templates, dark on light bg templates
+  // Section headings are always centered — only T2 (Bold Split right panel) is left-aligned
+  const secHAlign: 'left' | 'center' = templateId === 2 ? s.align : 'center';
+  const secHXOffset = templateId === 2 ? s.xOffset : 0.5;
+  const secHTextWidth = templateId === 2 ? s.textWidth : 9;
+
   slide.addText(sectionTitle, {
-    x: 0.5,
-    y: 1.8,
-    w: 9,
-    h: 2,
-    fontSize: 48,
+    x: secHXOffset,
+    y: titleY,
+    w: secHTextWidth,
+    h: titleH,
+    fontSize: Math.max(s.titleSize, 36),
     bold: true,
-    color: 'FFFFFF',
-    align: 'center',
+    color: s.titleColor,
+    align: secHAlign,
     valign: 'middle',
     fontFace: font,
+    charSpacing: -1,
+    wrap: true,
   });
 }
 
