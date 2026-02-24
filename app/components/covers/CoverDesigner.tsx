@@ -468,7 +468,8 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
                         onClick={() => {
                           setFontColorAuto((v) => {
                             const next = !v;
-                            if (next) setFontColor(getAutoFontColor(selectedTemplate, primaryColor));
+                            if (next)
+                              setFontColor(getAutoFontColor(selectedTemplate, primaryColor));
                             return next;
                           });
                         }}
