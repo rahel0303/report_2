@@ -33,4 +33,6 @@ export interface CoverDesignProps {
   subtitle?: string;
   period?: string;
   fontFamily?: string;
+  /** Override font/text color on the cover. When undefined each template uses its default. */
+  fontColor?: string;
 }

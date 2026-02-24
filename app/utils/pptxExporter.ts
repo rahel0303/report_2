@@ -399,37 +399,170 @@ function drawSlideInsight(
 
 // ─── Hybrid Cover Slide (screenshot bg + native text) ───────────
 
-/** Determine text colors and alignment based on template */
-function getCoverTextStyle(templateId: number, primaryColor: string) {
-  // Templates 2, 5 use dark text on light bg; rest use white text on dark bg
-  const isLightBg = templateId === 2 || templateId === 5;
-  // Template 5 is left-aligned
-  const isLeftAligned = templateId === 5;
+/**
+ * Determine text colors, alignment and positions per template.
+ * All 9 templates supported. fontColorOverride takes precedence over auto-detect.
+ */
+function getCoverTextStyle(templateId: number, primaryColor: string, fontColorOverride?: string) {
+  // Light-background templates (2=white card, 5,7,8,9=white bg)
+  const lightBgSet = new Set([2, 5, 7, 8, 9]);
+  const isLightBg = lightBgSet.has(templateId);
+  const leftAlignedSet = new Set([4, 5, 8]);
+  const isLeftAligned = leftAlignedSet.has(templateId);
+
+  // Auto title color per template
+  const autoTitleColors: Record<number, string> = {
+    1: 'FFFFFF',
+    2: '0f0f14',
+    3: 'FFFFFF',
+    4: 'FFFFFF',
+    5: cleanColor(primaryColor),
+    6: 'FFFFFF',
+    7: cleanColor(primaryColor),
+    8: cleanColor(primaryColor),
+    9: '111111',
+  };
+
+  const titleColor = fontColorOverride
+    ? cleanColor(fontColorOverride)
+    : autoTitleColors[templateId] || 'FFFFFF';
+  const subtitleColor = fontColorOverride
+    ? cleanColor(fontColorOverride)
+    : isLightBg
+      ? '6B7280'
+      : 'FFFFFF';
+  const periodColor = fontColorOverride
+    ? cleanColor(fontColorOverride)
+    : isLightBg
+      ? '9CA3AF'
+      : 'FFFFFF';
+  const footerColor = fontColorOverride
+    ? cleanColor(fontColorOverride)
+    : isLightBg
+      ? '9CA3AF'
+      : 'FFFFFF';
+
+  const subtitleTransparency = !fontColorOverride && !isLightBg ? 15 : 0;
+  const periodTransparency = !fontColorOverride && !isLightBg ? 20 : 0;
+  const footerTransparency = !fontColorOverride && !isLightBg ? 40 : 0;
+
+  const align: 'left' | 'center' = isLeftAligned ? 'left' : 'center';
+
+  // Defaults (centered layout, mid-slide title)
+  let xOffset = 0.5;
+  let textWidth = 9;
+  let titleY = 1.8;
+  let titleH = 1.4;
+  let subtitleY = 3.3;
+  let periodY = 4.0;
+  let footerY = 5.1;
+  let titleSize = 42;
+  let subtitleSize = 20;
+  let logoY = 0.4;
+  let logoX = -1; // -1 = auto-center
+
+  switch (templateId) {
+    case 2: // Bold Split — content on white card starting at 30%
+      xOffset = 3.1;
+      textWidth = 6.4;
+      titleY = 2.0;
+      titleH = 1.3;
+      subtitleY = 3.35;
+      periodY = 3.95;
+      footerY = 5.0;
+      titleSize = 36;
+      subtitleSize = 18;
+      logoX = 3.2;
+      logoY = 0.7;
+      break;
+    case 4: // Prism — content bottom-left, period above title
+      xOffset = 0.5;
+      textWidth = 8;
+      titleY = 3.0;
+      titleH = 1.4;
+      subtitleY = 4.5;
+      periodY = 2.4;
+      footerY = 5.5;
+      titleSize = 48;
+      logoX = 0.7;
+      logoY = 2.1;
+      break;
+    case 5: // Bauhaus — left-aligned
+      xOffset = 1.8;
+      textWidth = 7.0;
+      titleY = 1.9;
+      titleH = 1.4;
+      subtitleY = 3.4;
+      periodY = 1.4;
+      footerY = 5.1;
+      titleSize = 40;
+      logoX = 1.8;
+      logoY = 0.5;
+      break;
+    case 7: // Clean Line — centered white, period above title
+      xOffset = 0.5;
+      textWidth = 9;
+      titleY = 2.2;
+      titleH = 1.4;
+      subtitleY = 3.7;
+      periodY = 1.7;
+      footerY = 5.0;
+      break;
+    case 8: // Asymmetric — left-aligned
+      xOffset = 2.0;
+      textWidth = 7.0;
+      titleY = 2.0;
+      titleH = 1.4;
+      subtitleY = 3.5;
+      periodY = 1.5;
+      footerY = 5.1;
+      logoX = 2.0;
+      logoY = 0.5;
+      break;
+    case 9: // Nordic Frame — centered, period above title
+      xOffset = 1.5;
+      textWidth = 7.0;
+      titleY = 2.1;
+      titleH = 1.4;
+      subtitleY = 3.6;
+      periodY = 1.5;
+      footerY = 5.0;
+      break;
+  }
 
   return {
-    titleColor: isLightBg ? cleanColor(primaryColor) : 'FFFFFF',
-    subtitleColor: isLightBg ? '374151' : 'FFFFFF',
-    periodColor: isLightBg ? '4B5563' : 'FFFFFF',
-    footerColor: isLightBg ? '9CA3AF' : 'FFFFFF',
-    subtitleTransparency: isLightBg ? 0 : 15,
-    periodTransparency: isLightBg ? 0 : 20,
-    footerTransparency: isLightBg ? 0 : 40,
-    align: (isLeftAligned ? 'left' : 'center') as 'left' | 'center',
-    xOffset: isLeftAligned ? 0.8 : 0.5,
-    textWidth: isLeftAligned ? 8 : 9,
-    titleSize: templateId === 4 ? 48 : 42,
-    subtitleSize: templateId === 5 ? 22 : 20,
+    titleColor,
+    subtitleColor,
+    periodColor,
+    footerColor,
+    subtitleTransparency,
+    periodTransparency,
+    footerTransparency,
+    align,
+    xOffset,
+    textWidth,
+    titleY,
+    titleH,
+    subtitleY,
+    periodY,
+    footerY,
+    titleSize,
+    subtitleSize,
+    logoX,
+    logoY,
   };
 }
 
 /**
  * Create a cover slide using a screenshot background + native editable text.
  * Called from exportHelpers with the captured background image.
+ * Supports all 9 cover templates with correct text color/position per template.
  */
 export function createCoverSlideHybrid(pptx: PptxGenJS, config: ReportConfig, bgImageData: string) {
   const slide = pptx.addSlide();
   const font = config.font?.name || 'Inter';
   const templateId = Number(config.coverDesign?.templateId || 1);
+  const fontColorOverride = config.coverDesign?.fontColor;
 
   // Background: pixel-perfect screenshot
   slide.addImage({
@@ -440,16 +573,20 @@ export function createCoverSlideHybrid(pptx: PptxGenJS, config: ReportConfig, bg
     h: '100%',
   });
 
-  const s = getCoverTextStyle(templateId, config.coverDesign?.colors?.primary || '#3B82F6');
+  const s = getCoverTextStyle(
+    templateId,
+    config.coverDesign?.colors?.primary || '#3B82F6',
+    fontColorOverride,
+  );
 
-  // Logo (if base64 available) – square, centered for templates 1-4, left for template 5
+  // Logo — position determined per template
   if (config.coverDesign?.logoData) {
-    const logoSize = 1.2;
-    const logoX = templateId === 5 ? 0.8 : (10 - logoSize) / 2;
+    const logoSize = 1.1;
+    const logoX = s.logoX >= 0 ? s.logoX : (10 - logoSize) / 2;
     slide.addImage({
       data: config.coverDesign.logoData,
       x: logoX,
-      y: 0.4,
+      y: s.logoY,
       w: logoSize,
       h: logoSize,
       sizing: { type: 'contain', w: logoSize, h: logoSize },
@@ -459,9 +596,9 @@ export function createCoverSlideHybrid(pptx: PptxGenJS, config: ReportConfig, bg
   // Title
   slide.addText(config.reportTitle, {
     x: s.xOffset,
-    y: 1.8,
+    y: s.titleY,
     w: s.textWidth,
-    h: 1.2,
+    h: s.titleH,
     fontSize: s.titleSize,
     bold: true,
     color: s.titleColor,
@@ -474,7 +611,7 @@ export function createCoverSlideHybrid(pptx: PptxGenJS, config: ReportConfig, bg
   if (config.reportDetails) {
     slide.addText(config.reportDetails, {
       x: s.xOffset,
-      y: 3.1,
+      y: s.subtitleY,
       w: s.textWidth,
       h: 0.6,
       fontSize: s.subtitleSize,
@@ -490,10 +627,10 @@ export function createCoverSlideHybrid(pptx: PptxGenJS, config: ReportConfig, bg
   if (config.period) {
     slide.addText(config.period, {
       x: s.xOffset,
-      y: 3.8,
+      y: s.periodY,
       w: s.textWidth,
       h: 0.5,
-      fontSize: 18,
+      fontSize: 16,
       color: s.periodColor,
       transparency: s.periodTransparency,
       align: s.align,
@@ -505,7 +642,7 @@ export function createCoverSlideHybrid(pptx: PptxGenJS, config: ReportConfig, bg
   // Prepared by footer
   slide.addText(`Prepared by: ${config.preparedBy}`, {
     x: s.xOffset,
-    y: 5.1,
+    y: s.footerY,
     w: s.textWidth,
     h: 0.3,
     fontSize: 10,
@@ -2181,12 +2318,13 @@ export function createKPINative(pptx: PptxGenJS, config: ReportConfig, exportDat
   const metrics = exportData.metrics || [];
   const metricCount = metrics.length || 4;
   const metricsY = 0.95;
-  const metricsH = 1.1;
+  const metricsH = metricCount >= 6 ? 1.2 : 1.1;
   const metricsW = 9.4;
-  const metricCardW = (metricsW - (metricCount - 1) * 0.15) / metricCount;
+  const cardGap = metricCount >= 6 ? 0.08 : 0.15;
+  const metricCardW = (metricsW - (metricCount - 1) * cardGap) / metricCount;
 
   metrics.forEach((metric, idx) => {
-    const cardX = 0.3 + idx * (metricCardW + 0.15);
+    const cardX = 0.3 + idx * (metricCardW + cardGap);
 
     // Metric card bg
     slide.addShape(pptx.ShapeType.roundRect, {
@@ -2207,44 +2345,51 @@ export function createKPINative(pptx: PptxGenJS, config: ReportConfig, exportDat
       },
     });
 
-    // Metric label
+    // Metric label — no wrap to stay on 1 line
+    const labelFontSize = metricCount <= 5 ? 8 : 7;
     slide.addText(metric.label.toUpperCase(), {
       x: cardX + 0.1,
       y: metricsY + 0.12,
       w: metricCardW - 0.2,
       h: 0.2,
-      fontSize: 8,
+      fontSize: labelFontSize,
       bold: true,
       color: mutedColor,
       align: 'left',
       valign: 'top',
       fontFace: font,
+      wrap: false,
     });
 
-    // Metric value
+    // Metric value — font size scales with metric count to prevent overflow
+    const valueFontSize = metricCount <= 4 ? 22 : metricCount === 5 ? 18 : 14;
     slide.addText(metric.value, {
       x: cardX + 0.1,
       y: metricsY + 0.38,
       w: metricCardW - 0.2,
       h: 0.4,
-      fontSize: 24,
+      fontSize: valueFontSize,
       bold: true,
       color: textColor,
       align: 'left',
       valign: 'middle',
       fontFace: font,
+      wrap: false,
     });
 
-    // Trend badge
+    // Trend badge — width scales with card width for 5-6 metrics
     const trendColor = metric.trend === 'up' ? '10B981' : 'EF4444';
     const trendBg = metric.trend === 'up' ? 'D1FAE5' : 'FEE2E2';
     const trendArrow = metric.trend === 'up' ? '↑ ' : '↓ ';
+    const badgeW = metricCount >= 6 ? 0.58 : metricCount === 5 ? 0.65 : 0.75;
+    const badgeY = metricsY + 0.82;
+    const badgeH = 0.18;
 
     slide.addShape(pptx.ShapeType.roundRect, {
       x: cardX + 0.1,
-      y: metricsY + 0.82,
-      w: 0.75,
-      h: 0.18,
+      y: badgeY,
+      w: badgeW,
+      h: badgeH,
       fill: { color: isDark ? trendColor : trendBg, transparency: isDark ? 85 : 0 },
       line: { type: 'none' },
       rectRadius: 0.08,
@@ -2252,10 +2397,10 @@ export function createKPINative(pptx: PptxGenJS, config: ReportConfig, exportDat
 
     slide.addText(trendArrow + metric.trendValue, {
       x: cardX + 0.1,
-      y: metricsY + 0.82,
-      w: 0.75,
-      h: 0.18,
-      fontSize: 8,
+      y: badgeY,
+      w: badgeW,
+      h: badgeH,
+      fontSize: metricCount >= 6 ? 7 : 8,
       bold: true,
       color: trendColor,
       align: 'center',
@@ -2263,17 +2408,20 @@ export function createKPINative(pptx: PptxGenJS, config: ReportConfig, exportDat
       fontFace: font,
     });
 
-    // Caption
+    // Caption — side-by-side with badge, vertically centred to badge
+    const captionX = cardX + 0.1 + badgeW + 0.04;
+    const captionW = metricCardW - 0.2 - badgeW - 0.04;
     slide.addText('vs last period', {
-      x: cardX + 0.88,
-      y: metricsY + 0.82,
-      w: metricCardW - 0.98,
-      h: 0.18,
-      fontSize: 7,
+      x: captionX,
+      y: badgeY,
+      w: captionW,
+      h: badgeH,
+      fontSize: metricCount >= 6 ? 6 : 7,
       color: mutedColor,
       align: 'left',
       valign: 'middle',
       fontFace: font,
+      wrap: true,
     });
   });
 

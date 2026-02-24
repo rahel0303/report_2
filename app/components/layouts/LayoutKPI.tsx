@@ -78,17 +78,26 @@ export const LayoutKPI: React.FC<LayoutProps> = ({
             <Edit3 size={12} />
           </button>
         )}
-        <div className="flex gap-4 h-[120px]">
-          {Array.from({ length: metricCount }, (_, i) => i + 1).map((i) => (
-            <div key={i} className="flex-1">
-              <MetricScorecard
-                config={config}
-                savedState={data[`metric_${i}`]}
-                onSave={(val) => onUpdate(`metric_${i}`, val)}
-                isExport={isExport}
-              />
-            </div>
-          ))}
+        <div className={`flex h-30 ${metricCount >= 6 ? 'gap-1.5' : 'gap-4'}`}>
+          {Array.from({ length: metricCount }, (_, i) => i + 1).map((i) => {
+            // Collect metric IDs used by all OTHER scorecards for duplicate prevention
+            const siblingIds = Array.from({ length: metricCount }, (__, j) => j + 1)
+              .filter((j) => j !== i)
+              .map((j) => data[`metric_${j}`]?.id)
+              .filter(Boolean) as string[];
+            return (
+              <div key={i} className="flex-1 min-w-0">
+                <MetricScorecard
+                  config={config}
+                  savedState={data[`metric_${i}`]}
+                  onSave={(val) => onUpdate(`metric_${i}`, val)}
+                  isExport={isExport}
+                  metricCount={metricCount}
+                  selectedMetricIds={siblingIds}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
 

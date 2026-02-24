@@ -36,6 +36,8 @@ export interface ReportConfig {
       accent: string;
     };
     contentMode?: 'light' | 'dark';
+    /** Custom font/text color for cover & section headings */
+    fontColor?: string;
   };
 }
 
@@ -199,6 +201,8 @@ export interface MetricSelectionModalProps {
   onClose: () => void;
   onSelect: (metric: Metric) => void;
   config: ReportConfig;
+  /** IDs of metrics already selected in sibling scorecards */
+  selectedMetricIds?: string[];
 }
 
 export interface TableSelectionModalProps {
@@ -240,6 +244,10 @@ export interface MetricScorecardProps {
   savedState?: MetricData | null;
   onSave?: (data: MetricData) => void;
   isExport?: boolean;
+  /** Total number of metric cards in the row — used to scale font size */
+  metricCount?: number;
+  /** IDs of metrics already used in sibling scorecards */
+  selectedMetricIds?: string[];
 }
 
 export interface SmartTableBlockProps {

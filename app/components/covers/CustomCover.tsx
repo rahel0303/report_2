@@ -1,11 +1,15 @@
 import React from 'react';
 import { ReportConfig } from '@/app/types';
 import {
-  GeometricTemplate,
-  FluidWavesTemplate,
-  AbstractTemplate,
-  MinimalGradientTemplate,
-  ModernGridTemplate,
+  ModernNeonTemplate,
+  ModernSplitTemplate,
+  ModernGlassTemplate,
+  GeometricPrismTemplate,
+  GeometricBauhausTemplate,
+  GeometricHexTemplate,
+  MinimalistCleanTemplate,
+  MinimalistAsymmetricTemplate,
+  MinimalistFrameTemplate,
 } from '../covers/CoverTemplates';
 
 interface CustomCoverProps {
@@ -17,7 +21,7 @@ export const CustomCover: React.FC<CustomCoverProps> = ({ config }) => {
     return null;
   }
 
-  const { templateId, logoData, colors } = config.coverDesign;
+  const { templateId, logoData, colors, fontColor } = config.coverDesign;
 
   const props = {
     colors,
@@ -26,19 +30,28 @@ export const CustomCover: React.FC<CustomCoverProps> = ({ config }) => {
     subtitle: config.reportDetails,
     period: config.period,
     fontFamily: config.font.name,
+    fontColor,
   };
 
   switch (templateId) {
     case 1:
-      return <GeometricTemplate {...props} />;
+      return <ModernNeonTemplate {...props} />;
     case 2:
-      return <FluidWavesTemplate {...props} />;
+      return <ModernSplitTemplate {...props} />;
     case 3:
-      return <AbstractTemplate {...props} />;
+      return <ModernGlassTemplate {...props} />;
     case 4:
-      return <MinimalGradientTemplate {...props} />;
+      return <GeometricPrismTemplate {...props} />;
     case 5:
-      return <ModernGridTemplate {...props} />;
+      return <GeometricBauhausTemplate {...props} />;
+    case 6:
+      return <GeometricHexTemplate {...props} />;
+    case 7:
+      return <MinimalistCleanTemplate {...props} />;
+    case 8:
+      return <MinimalistAsymmetricTemplate {...props} />;
+    case 9:
+      return <MinimalistFrameTemplate {...props} />;
     default:
       return null;
   }

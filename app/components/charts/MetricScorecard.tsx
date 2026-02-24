@@ -9,6 +9,8 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
   savedState,
   onSave,
   isExport = false,
+  metricCount = 4,
+  selectedMetricIds = [],
 }) => {
   const [data, setData] = useState<MetricData | null>(savedState || null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -27,14 +29,59 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
     border: isDark ? 'border-white/20' : 'border-slate-200',
   };
 
-  // Font sizes for export
-  const fontSize = {
-    label: isExport ? 'text-base' : 'text-[10px]',
-    value: isExport ? 'text-5xl' : 'text-3xl',
-    trend: isExport ? 'text-base' : 'text-[10px]',
-    caption: isExport ? 'text-base' : 'text-[9px]',
-    emptyState: isExport ? 'text-lg' : 'text-[10px]',
+  // Font sizes — scaled by metricCount for both preview and export
+  const getSizes = (n: number, forExport: boolean) => {
+    if (forExport) {
+      if (n <= 4)
+        return {
+          label: 'text-sm',
+          value: 'text-4xl',
+          trend: 'text-xs',
+          caption: 'text-xs',
+          emptyState: 'text-base',
+        };
+      if (n === 5)
+        return {
+          label: 'text-xs',
+          value: 'text-3xl',
+          trend: 'text-xs',
+          caption: 'text-xs',
+          emptyState: 'text-sm',
+        };
+      return {
+        label: 'text-[10px]',
+        value: 'text-2xl',
+        trend: 'text-[10px]',
+        caption: 'text-[10px]',
+        emptyState: 'text-xs',
+      };
+    } else {
+      if (n <= 4)
+        return {
+          label: 'text-[10px]',
+          value: 'text-3xl',
+          trend: 'text-[10px]',
+          caption: 'text-[9px]',
+          emptyState: 'text-[10px]',
+        };
+      if (n === 5)
+        return {
+          label: 'text-[10px]',
+          value: 'text-2xl',
+          trend: 'text-[10px]',
+          caption: 'text-[9px]',
+          emptyState: 'text-[10px]',
+        };
+      return {
+        label: 'text-[10px]',
+        value: 'text-xl',
+        trend: 'text-[10px]',
+        caption: 'text-[9px]',
+        emptyState: 'text-[10px]',
+      };
+    }
   };
+  const fontSize = getSizes(metricCount, isExport);
 
   const handleSelect = (metric: Metric) => {
     let val: string, trend: 'up' | 'down', trendVal: string;
@@ -89,6 +136,7 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
           onClose={() => setIsModalOpen(false)}
           onSelect={handleSelect}
           config={config}
+          selectedMetricIds={selectedMetricIds}
         />
       </>
     );
@@ -97,16 +145,16 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
   return (
     <>
       <div
-        className={`w-full h-full rounded-xl border p-4 shadow-sm flex flex-col justify-between relative group cursor-pointer transition-all hover:shadow-md ${styles.border}`}
+        className={`w-full h-full rounded-xl border shadow-sm flex flex-col justify-between relative group cursor-pointer transition-all hover:shadow-md ${styles.border} ${metricCount >= 6 ? 'p-2' : 'p-4'}`}
         style={{ backgroundColor: styles.cardBg }}
         onClick={() => setIsModalOpen(true)}
       >
         <div className="flex justify-between items-start">
           <span
-            className={`${fontSize.label} font-bold uppercase tracking-wider flex items-center gap-1.5 ${styles.textMuted}`}
+            className={`${fontSize.label} font-bold uppercase tracking-wider flex items-center gap-1.5 ${styles.textMuted} truncate min-w-0`}
           >
-            <Activity size={12} />
-            {data.label}
+            <Activity size={12} className="shrink-0" />
+            <span className="truncate">{data.label}</span>
           </span>
           <button className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-blue-500">
             <Edit3 size={12} />
@@ -122,9 +170,9 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
           </span>
         </div>
 
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mt-2 flex flex-row items-start gap-1.5">
           <div
-            className={`flex items-center ${fontSize.trend} font-bold px-1.5 py-0.5 rounded-full ${
+            className={`flex items-center ${fontSize.trend} font-bold ${metricCount >= 6 ? 'px-1 py-0.5' : 'px-1.5 py-0.5'} rounded-full shrink-0 ${
               data.trend === 'up'
                 ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10 dark:text-emerald-400'
                 : 'text-rose-600 bg-rose-50 dark:bg-rose-500/10 dark:text-rose-400'
@@ -133,7 +181,11 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
             {data.trend === 'up' ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
             <span>{data.trendValue}</span>
           </div>
-          <span className={`${fontSize.caption} ${styles.textMuted}`}>vs last period</span>
+          <span
+            className={`${fontSize.caption} ${styles.textMuted} leading-tight wrap-break-word min-w-0`}
+          >
+            vs last period
+          </span>
         </div>
       </div>
 
@@ -142,6 +194,7 @@ export const MetricScorecard: React.FC<MetricScorecardProps> = ({
         onClose={() => setIsModalOpen(false)}
         onSelect={handleSelect}
         config={config}
+        selectedMetricIds={selectedMetricIds}
       />
     </>
   );

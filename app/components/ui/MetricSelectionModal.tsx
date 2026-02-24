@@ -33,6 +33,7 @@ export const MetricSelectionModal: React.FC<MetricSelectionModalProps> = ({
   onClose,
   onSelect,
   config,
+  selectedMetricIds = [],
 }) => {
   if (!isOpen) return null;
   const isDark = config.theme.type === 'dark';
@@ -50,7 +51,7 @@ export const MetricSelectionModal: React.FC<MetricSelectionModalProps> = ({
               Select Metric
             </h3>
             <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              Choose a key performance indicator to display.
+              Choose a KPI — already used metrics are disabled.
             </p>
           </div>
           <button onClick={onClose}>
@@ -59,20 +60,33 @@ export const MetricSelectionModal: React.FC<MetricSelectionModalProps> = ({
         </div>
 
         <div className="grid grid-cols-3 gap-3 max-h-[60vh] overflow-y-auto p-1">
-          {metrics.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => onSelect(m)}
-              className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all hover:scale-105 ${
-                isDark
-                  ? 'border-slate-700 hover:bg-slate-800 text-slate-300'
-                  : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-              }`}
-            >
-              <m.icon size={20} className="opacity-70" />
-              <span className="text-xs font-bold text-center">{m.label}</span>
-            </button>
-          ))}
+          {metrics.map((m) => {
+            const isUsed = selectedMetricIds.includes(m.id);
+            return (
+              <button
+                key={m.id}
+                onClick={() => !isUsed && onSelect(m)}
+                disabled={isUsed}
+                className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-2 transition-all relative ${
+                  isUsed
+                    ? isDark
+                      ? 'border-slate-700 bg-slate-800/50 text-slate-600 cursor-not-allowed opacity-50'
+                      : 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed opacity-50'
+                    : isDark
+                      ? 'border-slate-700 hover:bg-slate-800 text-slate-300 hover:scale-105'
+                      : 'border-slate-200 hover:bg-slate-50 text-slate-700 hover:scale-105'
+                }`}
+              >
+                <m.icon size={20} className="opacity-70" />
+                <span className="text-xs font-bold text-center">{m.label}</span>
+                {isUsed && (
+                  <span className="absolute top-1 right-1 text-[9px] font-bold text-slate-400 bg-slate-100 rounded px-1">
+                    ✓
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

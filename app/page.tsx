@@ -29,8 +29,19 @@ import { getDummyDataForTemplate } from './data/dummyData';
 
 // Import components
 import { AppHeader, Toasts } from './components/report';
-import { PlaceholderSlide, ReportCoverVisual, InstagramDashboardSlide, SectionHeadingSlide } from './components/slides';
-import { LayoutDashboard, LayoutComparison, LayoutKPI, LayoutContent, LayoutOverview } from './components/layouts';
+import {
+  PlaceholderSlide,
+  ReportCoverVisual,
+  InstagramDashboardSlide,
+  SectionHeadingSlide,
+} from './components/slides';
+import {
+  LayoutDashboard,
+  LayoutComparison,
+  LayoutKPI,
+  LayoutContent,
+  LayoutOverview,
+} from './components/layouts';
 import { CoverDesigner } from './components/covers/CoverDesigner';
 import { CustomCover } from './components/covers/CustomCover';
 import {
@@ -143,6 +154,7 @@ const ReportSetupInterface: React.FC = () => {
     subtitle: string,
     period: string,
     contentMode: 'light' | 'dark' = 'light',
+    fontColor?: string,
   ) => {
     setConfig((prev) => ({
       ...prev,
@@ -154,6 +166,7 @@ const ReportSetupInterface: React.FC = () => {
         logoData,
         colors,
         contentMode,
+        fontColor,
       },
     }));
     setCurrentStep('setup');
@@ -1257,14 +1270,30 @@ const ReportSetupInterface: React.FC = () => {
               </div>
 
               {/* Next Button */}
-              <button
-                onClick={goToNextSlide}
-                disabled={slides.findIndex((s) => s.id === activeSlideId) === slides.length - 1}
-                className="bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed p-4 rounded-xl shadow-md transition-all hover:scale-105 hover:shadow-lg border-2 border-slate-200 hover:border-blue-400"
-                title="Next slide (→ or ↓)"
-              >
-                <ChevronRight size={28} />
-              </button>
+              {(() => {
+                const isLast =
+                  slides.findIndex((s) => s.id === activeSlideId) === slides.length - 1;
+                return (
+                  <button
+                    onClick={() => {
+                      if (isLast) {
+                        addNewPage();
+                        setIsSlideTypeModalOpen(true);
+                      } else {
+                        goToNextSlide();
+                      }
+                    }}
+                    className={`p-4 rounded-xl shadow-md transition-all hover:scale-105 hover:shadow-lg border-2 ${
+                      isLast
+                        ? 'bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-300 hover:border-blue-500'
+                        : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200 hover:border-blue-400'
+                    }`}
+                    title={isLast ? 'Add new slide' : 'Next slide (→ or ↓)'}
+                  >
+                    {isLast ? <Plus size={28} /> : <ChevronRight size={28} />}
+                  </button>
+                );
+              })()}
             </div>
 
             {/* Keyboard shortcuts hint */}
@@ -1321,14 +1350,30 @@ const ReportSetupInterface: React.FC = () => {
               </div>
 
               {/* Next Button */}
-              <button
-                onClick={goToNextSlide}
-                disabled={slides.findIndex((s) => s.id === activeSlideId) === slides.length - 1}
-                className="bg-white hover:bg-slate-50 text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed p-4 rounded-xl shadow-md transition-all hover:scale-105 hover:shadow-lg border-2 border-slate-200 hover:border-blue-400"
-                title="Next slide (→ or ↓)"
-              >
-                <ChevronRight size={28} />
-              </button>
+              {(() => {
+                const isLast =
+                  slides.findIndex((s) => s.id === activeSlideId) === slides.length - 1;
+                return (
+                  <button
+                    onClick={() => {
+                      if (isLast) {
+                        addNewPage();
+                        setIsSlideTypeModalOpen(true);
+                      } else {
+                        goToNextSlide();
+                      }
+                    }}
+                    className={`p-4 rounded-xl shadow-md transition-all hover:scale-105 hover:shadow-lg border-2 ${
+                      isLast
+                        ? 'bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-300 hover:border-blue-500'
+                        : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200 hover:border-blue-400'
+                    }`}
+                    title={isLast ? 'Add new slide' : 'Next slide (→ or ↓)'}
+                  >
+                    {isLast ? <Plus size={28} /> : <ChevronRight size={28} />}
+                  </button>
+                );
+              })()}
             </div>
 
             {/* Keyboard shortcuts hint */}
@@ -1478,9 +1523,7 @@ const ReportSetupInterface: React.FC = () => {
                 onClick={() => {
                   // Clear old localStorage and reset slides only, KEEP current config
                   clearCurrentWorkOnly();
-                  setSlides([
-                    { id: 1, type: 'cover', title: 'Report Cover', content: {} },
-                  ]);
+                  setSlides([{ id: 1, type: 'cover', title: 'Report Cover', content: {} }]);
                   // DON'T reset config - keep user's selections!
                   setIsTemplateSelectionOpen(false);
                   setCurrentStep('review');

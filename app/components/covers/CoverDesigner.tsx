@@ -1,52 +1,102 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Sun, Moon } from 'lucide-react';
 import {
-  GeometricTemplate,
-  FluidWavesTemplate,
-  AbstractTemplate,
-  MinimalGradientTemplate,
-  ModernGridTemplate,
+  ModernNeonTemplate,
+  ModernSplitTemplate,
+  ModernGlassTemplate,
+  GeometricPrismTemplate,
+  GeometricBauhausTemplate,
+  GeometricHexTemplate,
+  MinimalistCleanTemplate,
+  MinimalistAsymmetricTemplate,
+  MinimalistFrameTemplate,
 } from './CoverTemplates';
 import { CoverTemplate, LogoAnalysis } from '@/app/types/cover';
 import { extractColorsFromImage } from '@/app/utils/colorExtractor';
 import { MiniTemplatePreview } from './MiniTemplatePreview';
 import type { ContentMode } from '@/app/utils/themeStyles';
 
-const TEMPLATES: CoverTemplate[] = [
+interface CoverTemplateWithCategory extends CoverTemplate {
+  category: 'modern' | 'geometric' | 'minimalist';
+}
+
+const TEMPLATES: CoverTemplateWithCategory[] = [
+  // Modern
   {
     id: 1,
-    name: 'Geometric Patterns',
-    description: 'Modern geometric shapes with bold colors',
-    patternStyle: 'geometric',
+    name: 'Neon Pulse',
+    description: 'Dark background with vibrant neon glow effects',
+    patternStyle: 'modern',
+    category: 'modern',
   },
   {
     id: 2,
-    name: 'Fluid Waves',
-    description: 'Smooth flowing waves with gradients',
-    patternStyle: 'waves',
+    name: 'Bold Split',
+    description: 'Diagonal color split with strong typography',
+    patternStyle: 'modern',
+    category: 'modern',
   },
   {
     id: 3,
-    name: 'Abstract Shapes',
-    description: 'Creative abstract elements with dynamic composition',
-    patternStyle: 'abstract',
+    name: 'Glass Morphism',
+    description: 'Frosted glass card over gradient mesh',
+    patternStyle: 'modern',
+    category: 'modern',
   },
+  // Geometric
   {
     id: 4,
-    name: 'Minimal Gradient',
-    description: 'Clean gradients with subtle patterns',
-    patternStyle: 'gradient',
+    name: 'Prism',
+    description: 'Sharp triangular prism shapes on dark canvas',
+    patternStyle: 'geometric',
+    category: 'geometric',
   },
   {
     id: 5,
-    name: 'Modern Grid',
-    description: 'Contemporary grid-based design with depth',
-    patternStyle: 'grid',
+    name: 'Bauhaus Grid',
+    description: 'Bold color blocks inspired by Bauhaus style',
+    patternStyle: 'geometric',
+    category: 'geometric',
+  },
+  {
+    id: 6,
+    name: 'Hexagon Mesh',
+    description: 'Honeycomb hexagon pattern with gradient',
+    patternStyle: 'geometric',
+    category: 'geometric',
+  },
+  // Minimalist
+  {
+    id: 7,
+    name: 'Clean Line',
+    description: 'Pure white with single gradient accent line',
+    patternStyle: 'minimal',
+    category: 'minimalist',
+  },
+  {
+    id: 8,
+    name: 'Asymmetric',
+    description: 'Off-center layout with elegant negative space',
+    patternStyle: 'minimal',
+    category: 'minimalist',
+  },
+  {
+    id: 9,
+    name: 'Nordic Frame',
+    description: 'Sophisticated corner frame, calm and refined',
+    patternStyle: 'minimal',
+    category: 'minimalist',
   },
 ];
+
+const CATEGORIES = [
+  { key: 'modern', label: 'Modern', icon: '⚡' },
+  { key: 'geometric', label: 'Geometric', icon: '◆' },
+  { key: 'minimalist', label: 'Minimalist', icon: '○' },
+] as const;
 
 interface CoverDesignerProps {
   onSelectCover?: (
@@ -57,11 +107,20 @@ interface CoverDesignerProps {
     subtitle: string,
     period: string,
     contentMode: ContentMode,
+    fontColor?: string,
   ) => void;
   initialTitle?: string;
   initialSubtitle?: string;
   initialPeriod?: string;
   fontFamily?: string;
+}
+
+/** Auto-derive a sensible font color based on template background */
+function getAutoFontColor(templateId: number | null): string {
+  if (!templateId) return '#ffffff';
+  // Light-background templates: 2(white card), 5, 7, 8, 9
+  const lightBg = new Set([2, 5, 7, 8, 9]);
+  return lightBg.has(templateId) ? '#111111' : '#ffffff';
 }
 
 export const CoverDesigner: React.FC<CoverDesignerProps> = ({
@@ -79,6 +138,15 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
   const [subtitle, setSubtitle] = useState(initialSubtitle || 'Performance Analytics & Insights');
   const [period, setPeriod] = useState(initialPeriod || 'January 2026');
   const [contentMode, setContentMode] = useState<ContentMode>('light');
+  const [fontColor, setFontColor] = useState<string>('#ffffff');
+  const [fontColorAuto, setFontColorAuto] = useState(true);
+
+  // Auto-update fontColor whenever template selection changes (if auto mode)
+  useEffect(() => {
+    if (fontColorAuto) {
+      setFontColor(getAutoFontColor(selectedTemplate));
+    }
+  }, [selectedTemplate, fontColorAuto]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -143,19 +211,28 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
       subtitle,
       period,
       fontFamily,
+      fontColor,
     };
 
     switch (templateId) {
       case 1:
-        return <GeometricTemplate {...props} />;
+        return <ModernNeonTemplate {...props} />;
       case 2:
-        return <FluidWavesTemplate {...props} />;
+        return <ModernSplitTemplate {...props} />;
       case 3:
-        return <AbstractTemplate {...props} />;
+        return <ModernGlassTemplate {...props} />;
       case 4:
-        return <MinimalGradientTemplate {...props} />;
+        return <GeometricPrismTemplate {...props} />;
       case 5:
-        return <ModernGridTemplate {...props} />;
+        return <GeometricBauhausTemplate {...props} />;
+      case 6:
+        return <GeometricHexTemplate {...props} />;
+      case 7:
+        return <MinimalistCleanTemplate {...props} />;
+      case 8:
+        return <MinimalistAsymmetricTemplate {...props} />;
+      case 9:
+        return <MinimalistFrameTemplate {...props} />;
       default:
         return null;
     }
@@ -175,6 +252,7 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
         subtitle,
         period,
         contentMode,
+        fontColor,
       );
       // Show success message
       alert(
@@ -263,7 +341,9 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
               <div className="bg-white rounded-xl shadow-sm p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-semibold">Brand Colors</h2>
-                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">Click to edit</span>
+                  <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                    Click to edit
+                  </span>
                 </div>
                 <div className="space-y-3">
                   <div className="flex items-center gap-3">
@@ -275,10 +355,12 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
                       <input
                         type="color"
                         value={analysis.colorPalette.primary}
-                        onChange={(e) => setAnalysis({
-                          ...analysis,
-                          colorPalette: { ...analysis.colorPalette, primary: e.target.value }
-                        })}
+                        onChange={(e) =>
+                          setAnalysis({
+                            ...analysis,
+                            colorPalette: { ...analysis.colorPalette, primary: e.target.value },
+                          })
+                        }
                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                       />
                     </label>
@@ -287,10 +369,12 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
                       <input
                         type="text"
                         value={analysis.colorPalette.primary}
-                        onChange={(e) => setAnalysis({
-                          ...analysis,
-                          colorPalette: { ...analysis.colorPalette, primary: e.target.value }
-                        })}
+                        onChange={(e) =>
+                          setAnalysis({
+                            ...analysis,
+                            colorPalette: { ...analysis.colorPalette, primary: e.target.value },
+                          })
+                        }
                         className="text-xs text-gray-500 font-mono bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none w-20"
                       />
                     </div>
@@ -304,10 +388,12 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
                       <input
                         type="color"
                         value={analysis.colorPalette.secondary}
-                        onChange={(e) => setAnalysis({
-                          ...analysis,
-                          colorPalette: { ...analysis.colorPalette, secondary: e.target.value }
-                        })}
+                        onChange={(e) =>
+                          setAnalysis({
+                            ...analysis,
+                            colorPalette: { ...analysis.colorPalette, secondary: e.target.value },
+                          })
+                        }
                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                       />
                     </label>
@@ -316,10 +402,12 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
                       <input
                         type="text"
                         value={analysis.colorPalette.secondary}
-                        onChange={(e) => setAnalysis({
-                          ...analysis,
-                          colorPalette: { ...analysis.colorPalette, secondary: e.target.value }
-                        })}
+                        onChange={(e) =>
+                          setAnalysis({
+                            ...analysis,
+                            colorPalette: { ...analysis.colorPalette, secondary: e.target.value },
+                          })
+                        }
                         className="text-xs text-gray-500 font-mono bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none w-20"
                       />
                     </div>
@@ -333,10 +421,12 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
                       <input
                         type="color"
                         value={analysis.colorPalette.accent}
-                        onChange={(e) => setAnalysis({
-                          ...analysis,
-                          colorPalette: { ...analysis.colorPalette, accent: e.target.value }
-                        })}
+                        onChange={(e) =>
+                          setAnalysis({
+                            ...analysis,
+                            colorPalette: { ...analysis.colorPalette, accent: e.target.value },
+                          })
+                        }
                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                       />
                     </label>
@@ -345,18 +435,142 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
                       <input
                         type="text"
                         value={analysis.colorPalette.accent}
-                        onChange={(e) => setAnalysis({
-                          ...analysis,
-                          colorPalette: { ...analysis.colorPalette, accent: e.target.value }
-                        })}
+                        onChange={(e) =>
+                          setAnalysis({
+                            ...analysis,
+                            colorPalette: { ...analysis.colorPalette, accent: e.target.value },
+                          })
+                        }
                         className="text-xs text-gray-500 font-mono bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none w-20"
                       />
                     </div>
                   </div>
+
+                  {/* Divider */}
+                  <div className="border-t border-gray-100 pt-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-xs font-semibold text-gray-700">Font Color</p>
+                      <button
+                        onClick={() => {
+                          setFontColorAuto((v) => {
+                            const next = !v;
+                            if (next) setFontColor(getAutoFontColor(selectedTemplate));
+                            return next;
+                          });
+                        }}
+                        className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
+                          fontColorAuto
+                            ? 'bg-blue-100 text-blue-700 border-blue-300'
+                            : 'bg-gray-100 text-gray-500 border-gray-300'
+                        }`}
+                      >
+                        {fontColorAuto ? '✦ Auto' : 'Manual'}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="relative cursor-pointer group">
+                        <div
+                          className="w-12 h-12 rounded-lg border-2 border-gray-200 shadow-sm transition-transform group-hover:scale-105"
+                          style={{ backgroundColor: fontColor, opacity: fontColorAuto ? 0.7 : 1 }}
+                        />
+                        <input
+                          type="color"
+                          value={fontColor}
+                          disabled={fontColorAuto}
+                          onChange={(e) => {
+                            setFontColorAuto(false);
+                            setFontColor(e.target.value);
+                          }}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                        />
+                      </label>
+                      <div className="flex-1">
+                        <input
+                          type="text"
+                          value={fontColor}
+                          readOnly={fontColorAuto}
+                          onChange={(e) => {
+                            setFontColorAuto(false);
+                            setFontColor(e.target.value);
+                          }}
+                          className={`text-xs font-mono border rounded px-2 py-1 w-24 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                            fontColorAuto ? 'text-gray-400 bg-gray-50' : 'text-gray-700 bg-white'
+                          }`}
+                        />
+                        <p className="text-[10px] text-gray-400 mt-0.5">
+                          {fontColorAuto
+                            ? 'Auto — matches template background'
+                            : 'Click swatch or type hex'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <p className="text-xs text-gray-400 mt-3 italic">
+                <p className="text-xs text-gray-400 mt-2 italic">
                   Colors auto-extracted from logo. Click swatches or type hex codes to customize.
                 </p>
+              </div>
+            )}
+
+            {/* Font Color standalone — shown only when no logo uploaded yet */}
+            {!analysis && (
+              <div className="bg-white rounded-xl shadow-sm p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-lg font-semibold">Font Color</h2>
+                  <button
+                    onClick={() => {
+                      setFontColorAuto((v) => {
+                        const next = !v;
+                        if (next) setFontColor(getAutoFontColor(selectedTemplate));
+                        return next;
+                      });
+                    }}
+                    className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                      fontColorAuto
+                        ? 'bg-blue-100 text-blue-700 border-blue-300'
+                        : 'bg-gray-100 text-gray-500 border-gray-300'
+                    }`}
+                  >
+                    {fontColorAuto ? '✦ Auto' : 'Manual'}
+                  </button>
+                </div>
+                <div className="flex items-center gap-3">
+                  <label className="relative cursor-pointer group">
+                    <div
+                      className="w-12 h-12 rounded-lg border-2 border-gray-200 shadow-sm transition-transform group-hover:scale-105"
+                      style={{ backgroundColor: fontColor, opacity: fontColorAuto ? 0.7 : 1 }}
+                    />
+                    <input
+                      type="color"
+                      value={fontColor}
+                      disabled={fontColorAuto}
+                      onChange={(e) => {
+                        setFontColorAuto(false);
+                        setFontColor(e.target.value);
+                      }}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                    />
+                  </label>
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      value={fontColor}
+                      readOnly={fontColorAuto}
+                      onChange={(e) => {
+                        setFontColorAuto(false);
+                        setFontColor(e.target.value);
+                      }}
+                      className={`text-xs font-mono border rounded px-2 py-1 w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                        fontColorAuto ? 'text-gray-400 bg-gray-50' : 'text-gray-700 bg-white'
+                      }`}
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      {fontColorAuto
+                        ? 'Auto — picked based on template. Toggle to override.'
+                        : 'Click swatch or type hex to change.'}
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -397,7 +611,9 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
             {/* Content Theme Mode */}
             <div className="bg-white rounded-xl shadow-sm p-6">
               <h2 className="text-lg font-semibold mb-2">Content Theme</h2>
-              <p className="text-xs text-gray-500 mb-4">Choose light or dark mode for your report slides</p>
+              <p className="text-xs text-gray-500 mb-4">
+                Choose light or dark mode for your report slides
+              </p>
               <div className="flex gap-2">
                 <button
                   onClick={() => setContentMode('light')}
@@ -438,67 +654,84 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
           {/* Right Side - Template Gallery */}
           <div className="lg:col-span-2">
             <div className="bg-white rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-semibold mb-4">Choose Your Template</h2>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                {TEMPLATES.map((template) => {
-                  const isSelected = selectedTemplate === template.id;
+              <h2 className="text-lg font-semibold mb-5">Choose Your Template</h2>
 
-                  // Create unique key that changes when colors change to force re-render
-                  const colorKey = analysis?.colorPalette
-                    ? `${analysis.colorPalette.primary}-${analysis.colorPalette.secondary}-${analysis.colorPalette.accent}`
-                    : 'default';
+              {CATEGORIES.map((cat) => {
+                const colorKey = analysis?.colorPalette
+                  ? `${analysis.colorPalette.primary}-${analysis.colorPalette.secondary}-${analysis.colorPalette.accent}`
+                  : 'default';
+                const currentColors = analysis?.colorPalette || {
+                  primary: '#3B82F6',
+                  secondary: '#8B5CF6',
+                  accent: '#EC4899',
+                };
+                const categoryTemplates = TEMPLATES.filter((t) => t.category === cat.key);
+                const categoryColors: Record<string, string> = {
+                  modern: 'text-violet-600 bg-violet-50 border-violet-200',
+                  geometric: 'text-blue-600 bg-blue-50 border-blue-200',
+                  minimalist: 'text-slate-600 bg-slate-50 border-slate-200',
+                };
 
-                  const currentColors = analysis?.colorPalette || {
-                    primary: '#3B82F6',
-                    secondary: '#8B5CF6',
-                    accent: '#EC4899',
-                  };
-
-                  return (
-                    <div
-                      key={`${template.id}-${colorKey}`}
-                      onClick={() => setSelectedTemplate(template.id)}
-                      className={`relative cursor-pointer rounded-xl overflow-hidden transition-all group ${
-                        isSelected
-                          ? 'ring-3 ring-blue-500 shadow-xl scale-105'
-                          : 'ring-1 ring-gray-200 hover:ring-2 hover:ring-blue-300 hover:shadow-lg'
-                      }`}
-                    >
-                      {isSelected && (
-                        <div className="absolute top-2 left-2 z-20 bg-blue-500 text-white w-6 h-6 rounded-full flex items-center justify-center shadow-lg">
-                          ✓
-                        </div>
-                      )}
-
-                      {/* Mini Preview */}
-                      <div className="aspect-[4/3] relative">
-                        <MiniTemplatePreview templateId={template.id} colors={currentColors} />
-
-                        {/* Hover Overlay */}
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all duration-200" />
-                      </div>
-
-                      {/* Info Section */}
-                      <div
-                        className={`p-2.5 transition-colors ${
-                          isSelected ? 'bg-blue-50' : 'bg-white'
-                        }`}
+                return (
+                  <div key={cat.key} className="mb-7 last:mb-0">
+                    {/* Category label */}
+                    <div className="flex items-center gap-2 mb-3">
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${categoryColors[cat.key]}`}
                       >
-                        <h3
-                          className={`text-xs font-semibold mb-0.5 ${
-                            isSelected ? 'text-blue-900' : 'text-gray-900'
-                          }`}
-                        >
-                          {template.name}
-                        </h3>
-                        <p className="text-[10px] text-gray-500 line-clamp-1">
-                          {template.description}
-                        </p>
-                      </div>
+                        <span>{cat.icon}</span>
+                        {cat.label}
+                      </span>
+                      <div className="flex-1 h-px bg-gray-100" />
                     </div>
-                  );
-                })}
-              </div>
+
+                    {/* 3-column grid */}
+                    <div className="grid grid-cols-3 gap-3">
+                      {categoryTemplates.map((template) => {
+                        const isSelected = selectedTemplate === template.id;
+                        return (
+                          <div
+                            key={`${template.id}-${colorKey}`}
+                            onClick={() => setSelectedTemplate(template.id)}
+                            className={`relative cursor-pointer rounded-xl overflow-hidden transition-all duration-200 group ${
+                              isSelected
+                                ? 'ring-2 ring-blue-500 shadow-xl scale-[1.04]'
+                                : 'ring-1 ring-gray-200 hover:ring-2 hover:ring-blue-300 hover:shadow-lg hover:scale-[1.02]'
+                            }`}
+                          >
+                            {isSelected && (
+                              <div className="absolute top-2 left-2 z-20 bg-blue-500 text-white w-5 h-5 rounded-full flex items-center justify-center shadow-lg text-[10px]">
+                                ✓
+                              </div>
+                            )}
+                            {/* Mini Preview */}
+                            <div className="aspect-4/3 relative">
+                              <MiniTemplatePreview
+                                templateId={template.id}
+                                colors={currentColors}
+                              />
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/8 transition-all duration-200" />
+                            </div>
+                            {/* Info */}
+                            <div
+                              className={`p-2 transition-colors ${isSelected ? 'bg-blue-50' : 'bg-white'}`}
+                            >
+                              <h3
+                                className={`text-[11px] font-semibold mb-0.5 ${isSelected ? 'text-blue-700' : 'text-gray-900'}`}
+                              >
+                                {template.name}
+                              </h3>
+                              <p className="text-[9px] text-gray-400 line-clamp-1">
+                                {template.description}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
 
               {/* Large Preview */}
               {selectedTemplate && (
@@ -563,7 +796,9 @@ const ContentThemePreview: React.FC<ContentThemePreviewProps> = ({ colors, mode,
       ? `linear-gradient(135deg, #0f172a 0%, rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.05) 50%, #0f172a 100%)`
       : `linear-gradient(135deg, rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.03) 0%, rgba(${rgbSecondary.r}, ${rgbSecondary.g}, ${rgbSecondary.b}, 0.02) 100%)`,
     cardBg: isDark ? 'rgba(30, 41, 59, 0.8)' : '#ffffff',
-    border: isDark ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.3)` : `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)`,
+    border: isDark
+      ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.3)`
+      : `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)`,
     textMain: isDark ? '#f8fafc' : '#1e293b',
     textMuted: isDark ? '#94a3b8' : '#64748b',
     accentLine: `linear-gradient(90deg, ${colors.primary} 0%, ${colors.secondary} 50%, ${colors.accent} 100%)`,
@@ -576,14 +811,19 @@ const ContentThemePreview: React.FC<ContentThemePreviewProps> = ({ colors, mode,
     >
       {/* Accent line at top */}
       <div
-        className="absolute top-0 left-0 right-0 h-[3px]"
+        className="absolute top-0 left-0 right-0 h-0.75"
         style={{ background: styles.accentLine }}
       />
 
       {/* Decorative circles */}
       <div
         className="absolute -top-10 -right-10 w-32 h-32 rounded-full opacity-50"
-        style={{ background: isDark ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)` : `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.06)`, filter: 'blur(20px)' }}
+        style={{
+          background: isDark
+            ? `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)`
+            : `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.06)`,
+          filter: 'blur(20px)',
+        }}
       />
 
       {/* Header */}
@@ -611,7 +851,7 @@ const ContentThemePreview: React.FC<ContentThemePreviewProps> = ({ colors, mode,
       <div className="flex gap-3 h-[calc(100%-80px)]">
         {/* Chart Card */}
         <div
-          className="flex-[2] rounded-lg p-3 relative overflow-hidden"
+          className="flex-2 rounded-lg p-3 relative overflow-hidden"
           style={{
             backgroundColor: styles.cardBg,
             border: `1px solid ${styles.border}`,
@@ -622,11 +862,14 @@ const ContentThemePreview: React.FC<ContentThemePreviewProps> = ({ colors, mode,
         >
           {/* Card accent line */}
           <div
-            className="absolute top-0 left-3 right-3 h-[2px] rounded-full"
+            className="absolute top-0 left-3 right-3 h-0.5 rounded-full"
             style={{ background: styles.accentLine }}
           />
 
-          <div className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: styles.textMuted }}>
+          <div
+            className="text-[10px] font-bold uppercase tracking-wider mb-2"
+            style={{ color: styles.textMuted }}
+          >
             Chart Area
           </div>
 
@@ -671,7 +914,10 @@ const ContentThemePreview: React.FC<ContentThemePreviewProps> = ({ colors, mode,
                   border: `1px solid ${styles.border}`,
                 }}
               >
-                <div className="text-[8px] uppercase tracking-wider" style={{ color: styles.textMuted }}>
+                <div
+                  className="text-[8px] uppercase tracking-wider"
+                  style={{ color: styles.textMuted }}
+                >
                   {m.label}
                 </div>
                 <div className="text-sm font-bold" style={{ color: styles.textMain }}>
@@ -690,18 +936,23 @@ const ContentThemePreview: React.FC<ContentThemePreviewProps> = ({ colors, mode,
               border: `1px solid ${styles.border}`,
             }}
           >
-            <div className="text-[8px] font-bold uppercase tracking-wider mb-1" style={{ color: styles.textMuted }}>
+            <div
+              className="text-[8px] font-bold uppercase tracking-wider mb-1"
+              style={{ color: styles.textMuted }}
+            >
               Key Insights
             </div>
             <div className="space-y-1">
-              {['Engagement up by **12%**', 'Peak time at **9 AM**', 'Reels perform **2x** better'].map(
-                (insight, i) => (
-                  <div key={i} className="flex gap-1 text-[8px]" style={{ color: styles.textMain }}>
-                    <span style={{ color: colors.accent }}>•</span>
-                    <span>{insight.replace(/\*\*/g, '')}</span>
-                  </div>
-                )
-              )}
+              {[
+                'Engagement up by **12%**',
+                'Peak time at **9 AM**',
+                'Reels perform **2x** better',
+              ].map((insight, i) => (
+                <div key={i} className="flex gap-1 text-[8px]" style={{ color: styles.textMain }}>
+                  <span style={{ color: colors.accent }}>•</span>
+                  <span>{insight.replace(/\*\*/g, '')}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>

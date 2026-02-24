@@ -27,7 +27,7 @@ export const SectionHeadingSlide: React.FC<SectionHeadingSlideProps> = ({
   const theme = generateLayoutTheme(
     config.coverDesign?.colors,
     config.theme.brandColor,
-    contentMode
+    contentMode,
   );
   const colors = theme.colors;
 
@@ -46,6 +46,9 @@ export const SectionHeadingSlide: React.FC<SectionHeadingSlideProps> = ({
       setIsEditing(false);
     }
   };
+
+  // Get font color: from cover design setting, else white (gradient bg is always colored)
+  const titleFontColor = config.coverDesign?.fontColor || '#ffffff';
 
   return (
     <div
@@ -141,17 +144,18 @@ export const SectionHeadingSlide: React.FC<SectionHeadingSlideProps> = ({
             onBlur={handleSave}
             onKeyDown={handleKeyDown}
             autoFocus
-            className="w-full text-6xl md:text-7xl font-bold text-white text-center bg-transparent border-b-4 border-white/50 outline-none focus:border-white/80 transition-colors"
-            style={{ fontFamily: config.font?.name || 'Inter' }}
+            className="w-full text-6xl md:text-7xl font-bold text-center bg-transparent border-b-4 border-white/50 outline-none focus:border-white/80 transition-colors"
+            style={{ color: titleFontColor, fontFamily: config.font?.name || 'Inter' }}
             placeholder="Enter section title..."
           />
         ) : (
           <h1
             onClick={() => !isExport && setIsEditing(true)}
-            className={`text-6xl md:text-7xl font-bold text-white ${
+            className={`text-6xl md:text-7xl font-bold ${
               !isExport ? 'cursor-pointer hover:opacity-90 transition-opacity' : ''
             }`}
             style={{
+              color: titleFontColor,
               textShadow: '0 4px 30px rgba(0,0,0,0.3)',
               letterSpacing: '-0.02em',
             }}
@@ -163,26 +167,11 @@ export const SectionHeadingSlide: React.FC<SectionHeadingSlideProps> = ({
 
         {/* Bottom decorative element */}
         <div className="flex items-center justify-center gap-4 mt-8">
-          <div
-            className="w-20 h-1 rounded-full opacity-40"
-            style={{ backgroundColor: 'white' }}
-          />
-          <div
-            className="w-2 h-2 rounded-full"
-            style={{ backgroundColor: colors.accent }}
-          />
-          <div
-            className="w-8 h-1 rounded-full opacity-30"
-            style={{ backgroundColor: 'white' }}
-          />
-          <div
-            className="w-2 h-2 rounded-full"
-            style={{ backgroundColor: colors.accent }}
-          />
-          <div
-            className="w-20 h-1 rounded-full opacity-40"
-            style={{ backgroundColor: 'white' }}
-          />
+          <div className="w-20 h-1 rounded-full opacity-40" style={{ backgroundColor: 'white' }} />
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: colors.accent }} />
+          <div className="w-8 h-1 rounded-full opacity-30" style={{ backgroundColor: 'white' }} />
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: colors.accent }} />
+          <div className="w-20 h-1 rounded-full opacity-40" style={{ backgroundColor: 'white' }} />
         </div>
       </div>
 
