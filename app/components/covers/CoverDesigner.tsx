@@ -124,14 +124,13 @@ interface CoverDesignerProps {
 /** Auto-derive a sensible font color based on template background and primary color */
 function getAutoFontColor(templateId: number | null, primaryColor?: string): string {
   if (!templateId) return '#ffffff';
-  // Templates with truly dark backgrounds — always white text
-  const alwaysDark = new Set([1, 4]);
-  if (alwaysDark.has(templateId)) return '#ffffff';
-  // Light-background templates — always dark text
-  const alwaysLight = new Set([2, 9]);
-  if (alwaysLight.has(templateId)) return '#111111';
-  // Templates 3 & 6: gradient from primaryColor — infer from luminance
-  // Templates 5, 7, 8: white/fafafa bg with primary-colored text — infer from luminance
+  // Always dark bg → always white text
+  if (templateId === 1 || templateId === 4) return '#ffffff';
+  // Always light/white bg → always dark text (2=white card, 5/7/8/9=white or #fafafa)
+  if (templateId === 2 || templateId === 5 || templateId === 7 || templateId === 8 || templateId === 9)
+    return '#111111';
+  // Templates 3 & 6: gradient built entirely from primaryColor
+  // → if primary is light the gradient will be light too, so infer from luminance
   const lum = hexLuminance(primaryColor || '#3B82F6');
   return lum > 0.35 ? '#111111' : '#ffffff';
 }
