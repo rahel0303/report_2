@@ -28,7 +28,7 @@ export const getDefaultConfig = (): ReportConfig => ({
   period: 'January 2026',
   theme: themesData[0],
   font: fontsData[0],
-  clientName: 'BYD',
+  clientName: '',
   selectedCompetitors: [],
   coverDesign: undefined,
 });

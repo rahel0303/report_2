@@ -16,6 +16,7 @@ import {
   Presentation,
   FileText,
   CheckCircle2,
+  FlaskConical,
 } from 'lucide-react';
 
 // Import types
@@ -36,6 +37,27 @@ import {
   SectionHeadingSlide,
 } from './components/slides';
 import {
+  AllChannelOverviewSlide,
+  AllChannelSentimentSlide,
+  ChannelSentimentSlide,
+  IgGrowthSlide,
+  IgBestLeastSlide,
+  IgContentPillarSlide,
+  IgTaggedPostSlide,
+  TtGrowthSlide,
+  TtBestLeastSlide,
+  TtContentPillarSlide,
+  IgCpEngSlide,
+  IgCpReachSlide,
+  TwGrowthSlide,
+  TwBestLeastSlide,
+  TwContentSlide,
+  FbGrowthSlide,
+  CompetitorOverviewSlide,
+  CompetitorDetailSlide,
+  CompetitorIgFocusSlide,
+} from './innercircle/slides';
+import {
   LayoutDashboard,
   LayoutComparison,
   LayoutKPI,
@@ -44,6 +66,7 @@ import {
 } from './components/layouts';
 import { CoverDesigner } from './components/covers/CoverDesigner';
 import { CustomCover } from './components/covers/CustomCover';
+import { ThankYouSlide } from './components/covers/ThankYouSlide';
 import {
   TemplateModal,
   SaveModal,
@@ -80,6 +103,8 @@ const ReportSetupInterface: React.FC = () => {
   const [editingTitleId, setEditingTitleId] = useState<number | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isDownloadOpen, setIsDownloadOpen] = useState(false);
+  const [showDebugModal, setShowDebugModal] = useState(false);
+  const [debugSelectedIds, setDebugSelectedIds] = useState<Set<number>>(new Set());
   const [showSaveToast, setShowSaveToast] = useState(false);
   const [showExportToast, setShowExportToast] = useState(false);
 
@@ -105,9 +130,31 @@ const ReportSetupInterface: React.FC = () => {
   const saveDropdownRef = useRef<HTMLDivElement>(null);
   const loadDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Brands from DB
+  const [brandList, setBrandList] = useState<
+    { id: number; brand_name_identifier: string; brand_name_display: string }[]
+  >([]);
+
   // Load slides from localStorage on mount
   useEffect(() => {
     setSlides(loadSlidesFromStorage());
+  }, []);
+
+  // Fetch client brands from database
+  useEffect(() => {
+    fetch('/api/brands')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.brands && data.brands.length > 0) {
+          setBrandList(data.brands);
+          setConfig((prev) => ({
+            ...prev,
+            // Always default to first brand from DB on initial load (empty = not yet set)
+            clientName: prev.clientName || data.brands[0].brand_name_display,
+          }));
+        }
+      })
+      .catch(console.error);
   }, []);
 
   // Auto-save slides to localStorage whenever they change
@@ -116,6 +163,17 @@ const ReportSetupInterface: React.FC = () => {
   }, [slides]);
 
   const [config, setConfig] = useState<ReportConfig>(getDefaultConfig());
+
+  // Re-fill clientName from already-fetched brandList whenever it becomes empty (e.g. after reset)
+  useEffect(() => {
+    if (!config.clientName && brandList.length > 0) {
+      setConfig((prev) => ({
+        ...prev,
+        clientName: brandList[0].brand_name_display,
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.clientName, brandList]);
 
   // Load config from localStorage on mount - ONLY if localStorage has it and state is default
   useEffect(() => {
@@ -132,6 +190,29 @@ const ReportSetupInterface: React.FC = () => {
       timestamp: new Date().toISOString(),
     });
   }, [config.clientName, config.period]);
+
+  // Pre-expand ig_content_pillar slides as soon as brand + period are known
+  // so all pillar slides exist before the user enters review mode.
+  // NOTE: `slides` is intentionally in the dep array so this re-runs once slides load.
+  useEffect(() => {
+    if (!config.clientName || !config.period) return;
+    const firstPillarSlide = slides.find((s) => s.type === 'ic_ig_content_pillar');
+    if (!firstPillarSlide) return;
+    const pillarCount = slides.filter((s) => s.type === 'ic_ig_content_pillar').length;
+    if (pillarCount > 1) return; // already expanded — stop
+    fetch(
+      `/api/innercircle/ig-content-pillar?brand=${encodeURIComponent(config.clientName)}&period=${encodeURIComponent(config.period)}`,
+    )
+      .then((r) => r.json())
+      .then((d) => {
+        const total: number = (d.pillars || []).length;
+        if (total > 0) handlePillarSlidesNeeded(firstPillarSlide.id, total);
+      })
+      .catch(() => {
+        /* silent */
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.clientName, config.period, slides]);
 
   // DON'T auto-save config - only save when explicitly saving report/template
   // This prevents localStorage from caching old selections
@@ -243,6 +324,20 @@ const ReportSetupInterface: React.FC = () => {
   const handleDownloadWrapper = async (format: string) => {
     setIsDownloadOpen(false);
     await handleDownload(format, slides, config, setIsExporting, setShowExportToast);
+  };
+
+  const openDebugModal = () => {
+    setIsDownloadOpen(false);
+    // Pre-select all slides
+    setDebugSelectedIds(new Set(slides.map((s) => s.id)));
+    setShowDebugModal(true);
+  };
+
+  const handleDebugExport = async () => {
+    setShowDebugModal(false);
+    const selected = slides.filter((s) => debugSelectedIds.has(s.id));
+    if (selected.length === 0) return;
+    await handleDownload('pptx', selected, config, setIsExporting, setShowExportToast);
   };
 
   const goToSlide = (id: number) => {
@@ -503,6 +598,11 @@ const ReportSetupInterface: React.FC = () => {
   };
 
   const handleSlideContentChange = (slideId: number, key: string, value: any) => {
+    // Special: auto-expand content pillar slides based on actual pillar count
+    if (key === '_pillarSlidesNeeded' && typeof value === 'number') {
+      handlePillarSlidesNeeded(slideId, value);
+      return;
+    }
     setSlides((prev) =>
       prev.map((slide) => {
         if (slide.id === slideId) {
@@ -522,6 +622,53 @@ const ReportSetupInterface: React.FC = () => {
     );
     // Show brief save indicator (optional)
     console.log('✓ Changes auto-saved');
+  };
+
+  // Auto-create the correct number of ic_ig_content_pillar slides (2 pillars per slide)
+  const handlePillarSlidesNeeded = (slideId: number, totalPillars: number) => {
+    const needed = Math.ceil(totalPillars / 2); // how many slides total
+    setSlides((prev) => {
+      const idx = prev.findIndex((s) => s.id === slideId);
+      if (idx === -1) return prev;
+
+      // Count existing consecutive pillar slides starting at idx
+      let existingCount = 0;
+      for (let i = idx; i < prev.length && prev[i].type === 'ic_ig_content_pillar'; i++) {
+        existingCount++;
+      }
+
+      if (existingCount === needed) return prev; // already the right count
+
+      const maxId = Math.max(...prev.map((s) => s.id), 0);
+      const pillarSlides: Slide[] = [];
+      for (let i = 0; i < needed; i++) {
+        const rangeStart = i * 2 + 1;
+        const rangeEnd = Math.min(i * 2 + 2, totalPillars);
+        const title =
+          needed === 1
+            ? 'Instagram Content Pillar'
+            : `Instagram Content Pillar (${rangeStart}-${rangeEnd})`;
+        if (i === 0) {
+          // Preserve the existing first slide, ensure offset = 0, update title
+          pillarSlides.push({
+            ...prev[idx],
+            title,
+            content: { ...prev[idx].content, pillarOffset: 0 },
+          });
+        } else {
+          pillarSlides.push({
+            id: maxId + i,
+            type: 'ic_ig_content_pillar',
+            title,
+            content: { pillarOffset: i * 2 },
+          });
+        }
+      }
+
+      const before = prev.slice(0, idx);
+      const after = prev.slice(idx + existingCount);
+      return [...before, ...pillarSlides, ...after];
+    });
   };
 
   const addNewPage = () => {
@@ -825,40 +972,73 @@ const ReportSetupInterface: React.FC = () => {
                     <label className="text-xs font-bold uppercase text-slate-400 mb-2 block">
                       Parameters
                     </label>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-3">
+                      {/* Type - fixed to Monthly */}
                       <div>
                         <label className="block text-[10px] font-semibold text-slate-500 mb-1">
                           Type
                         </label>
-                        <select
-                          value={config.reportType}
-                          onChange={(e) =>
-                            setConfig({
-                              ...config,
-                              reportType: e.target.value as 'Monthly' | 'Quarterly',
-                            })
-                          }
-                          className="w-full border p-2 rounded text-sm bg-white"
-                        >
-                          <option value="Monthly">Monthly</option>
-                          <option value="Quarterly">Quarterly</option>
-                        </select>
+                        <div className="w-full border p-2 rounded text-sm bg-slate-50 text-slate-700 font-medium">
+                          Monthly
+                        </div>
                       </div>
+                      {/* Period - month + year selectors */}
                       <div>
                         <label className="block text-[10px] font-semibold text-slate-500 mb-1">
                           Period
                         </label>
-                        <select
-                          value={config.period}
-                          onChange={(e) => setConfig({ ...config, period: e.target.value })}
-                          className="w-full border p-2 rounded text-sm bg-white"
-                        >
-                          {getPeriodOptions(config.reportType).map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="grid grid-cols-2 gap-2">
+                          <select
+                            value={config.period.split(' ')[0] || 'January'}
+                            onChange={(e) => {
+                              const year =
+                                config.period.split(' ')[1] || String(new Date().getFullYear());
+                              setConfig({
+                                ...config,
+                                period: `${e.target.value} ${year}`,
+                                reportType: 'Monthly',
+                              });
+                            }}
+                            className="w-full border p-2 rounded text-sm bg-white"
+                          >
+                            {[
+                              'January',
+                              'February',
+                              'March',
+                              'April',
+                              'May',
+                              'June',
+                              'July',
+                              'August',
+                              'September',
+                              'October',
+                              'November',
+                              'December',
+                            ].map((m) => (
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            value={config.period.split(' ')[1] || String(new Date().getFullYear())}
+                            onChange={(e) => {
+                              const month = config.period.split(' ')[0] || 'January';
+                              setConfig({
+                                ...config,
+                                period: `${month} ${e.target.value}`,
+                                reportType: 'Monthly',
+                              });
+                            }}
+                            className="w-full border p-2 rounded text-sm bg-white"
+                          >
+                            {[2024, 2025, 2026, 2027].map((y) => (
+                              <option key={y} value={y}>
+                                {y}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                     </div>
 
@@ -872,11 +1052,15 @@ const ReportSetupInterface: React.FC = () => {
                         onChange={handleClientChange}
                         className="w-full border p-2 rounded text-sm bg-white cursor-pointer hover:border-blue-400 focus:border-blue-500 focus:outline-none transition-colors"
                       >
-                        {Object.keys(CLIENT_DATA).map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
-                        ))}
+                        {brandList.length === 0 ? (
+                          <option value="">Loading...</option>
+                        ) : (
+                          brandList.map((b) => (
+                            <option key={b.id} value={b.brand_name_display}>
+                              {b.brand_name_display}
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
 
@@ -887,8 +1071,8 @@ const ReportSetupInterface: React.FC = () => {
                       </label>
                       <div className="relative">
                         <button
-                          onClick={() => setIsCompetitorDropdownOpen(!isCompetitorDropdownOpen)}
-                          className="w-full border p-2 rounded text-sm bg-white flex justify-between items-center text-left min-h-9.5 hover:border-blue-400 transition-colors"
+                          disabled
+                          className="w-full border p-2 rounded text-sm bg-slate-50 flex justify-between items-center text-left min-h-9.5 cursor-not-allowed opacity-50"
                         >
                           <span
                             className={`truncate block ${
@@ -1123,6 +1307,22 @@ const ReportSetupInterface: React.FC = () => {
                           <span className="text-[10px] text-slate-400">Editable slides</span>
                         </div>
                       </button>
+                      <button
+                        onClick={openDebugModal}
+                        className="w-full text-left px-4 py-3 hover:bg-amber-50 flex items-center gap-3 transition-colors border-t border-slate-100"
+                      >
+                        <div className="bg-amber-50 text-amber-500 p-1.5 rounded-lg">
+                          <FlaskConical size={16} />
+                        </div>
+                        <div>
+                          <span className="text-xs font-bold text-slate-800 block">
+                            Debug Export
+                          </span>
+                          <span className="text-[10px] text-amber-500 font-medium">
+                            Select slides only
+                          </span>
+                        </div>
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1175,9 +1375,15 @@ const ReportSetupInterface: React.FC = () => {
                       </div>
 
                       <div className="absolute inset-0 bg-white/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition duration-200">
-                        <div className="bg-white px-4 py-2 rounded-full shadow-sm text-xs font-bold text-blue-600 flex items-center gap-2 border border-slate-100">
-                          <MousePointerClick size={12} /> Edit Slide
-                        </div>
+                        {slide.type.startsWith('ic_') ? (
+                          <div className="bg-emerald-50 px-4 py-2 rounded-full shadow-sm text-xs font-bold text-emerald-700 flex items-center gap-2 border border-emerald-200">
+                            <MousePointerClick size={12} /> View Slide
+                          </div>
+                        ) : (
+                          <div className="bg-white px-4 py-2 rounded-full shadow-sm text-xs font-bold text-blue-600 flex items-center gap-2 border border-slate-100">
+                            <MousePointerClick size={12} /> Edit Slide
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="p-4 flex items-center justify-between group/title h-14">
@@ -1202,16 +1408,23 @@ const ReportSetupInterface: React.FC = () => {
                           >
                             {slide.title}
                           </h3>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingTitleId(slide.id);
-                            }}
-                            className="opacity-0 group-hover/title:opacity-100 text-slate-400 hover:text-blue-500 transition-opacity p-1 bg-slate-50 rounded-md hover:bg-blue-50"
-                            title="Rename Slide"
-                          >
-                            <Edit3 size={14} />
-                          </button>
+                          {!slide.type.startsWith('ic_') && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingTitleId(slide.id);
+                              }}
+                              className="opacity-0 group-hover/title:opacity-100 text-slate-400 hover:text-blue-500 transition-opacity p-1 bg-slate-50 rounded-md hover:bg-blue-50"
+                              title="Rename Slide"
+                            >
+                              <Edit3 size={14} />
+                            </button>
+                          )}
+                          {slide.type.startsWith('ic_') && (
+                            <span className="text-[9px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                              Live Data
+                            </span>
+                          )}
                         </>
                       )}
                     </div>
@@ -1310,17 +1523,26 @@ const ReportSetupInterface: React.FC = () => {
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-8rem)] py-4">
             <div className="w-full max-w-6xl mb-2 flex justify-between items-end">
               <h2 className="font-bold text-slate-700 flex items-center gap-2">
-                <Layout size={16} /> Editing: {slides.find((s) => s.id === activeSlideId)?.title}
+                <Layout size={16} />
+                {slides.find((s) => s.id === activeSlideId)?.type.startsWith('ic_')
+                  ? `Viewing: ${slides.find((s) => s.id === activeSlideId)?.title}`
+                  : `Editing: ${slides.find((s) => s.id === activeSlideId)?.title}`}
               </h2>
               <div className="flex items-center gap-3">
-                {slides.find((s) => s.id === activeSlideId)?.type !== 'cover' && (
-                  <button
-                    onClick={() => handleDeleteSlide(activeSlideId!)}
-                    className="text-xs font-medium text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors border border-red-200 hover:border-red-300"
-                    title="Delete this slide"
-                  >
-                    <X size={14} /> Delete Slide
-                  </button>
+                {slides.find((s) => s.id === activeSlideId)?.type !== 'cover' &&
+                  !slides.find((s) => s.id === activeSlideId)?.type.startsWith('ic_') && (
+                    <button
+                      onClick={() => handleDeleteSlide(activeSlideId!)}
+                      className="text-xs font-medium text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors border border-red-200 hover:border-red-300"
+                      title="Delete this slide"
+                    >
+                      <X size={14} /> Delete Slide
+                    </button>
+                  )}
+                {slides.find((s) => s.id === activeSlideId)?.type.startsWith('ic_') && (
+                  <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200 flex items-center gap-1.5">
+                    Live Data – View Only
+                  </span>
                 )}
                 <span className="text-xs font-mono bg-slate-100 px-3 py-1 rounded text-slate-600">
                   {slides.findIndex((s) => s.id === activeSlideId) + 1} / {slides.length}
@@ -1485,6 +1707,240 @@ const ReportSetupInterface: React.FC = () => {
                   title={slide.content?.sectionTitle || slide.title || 'Section Title'}
                   isExport={true}
                 />
+              ) : slide.type === 'ic_all_overview' ? (
+                isExporting ? (
+                  <AllChannelOverviewSlide
+                    config={config}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_all_sentiment' ? (
+                isExporting ? (
+                  <AllChannelSentimentSlide
+                    config={config}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_ig_sentiment' ? (
+                isExporting ? (
+                  <ChannelSentimentSlide
+                    config={config}
+                    platform="instagram"
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_tt_sentiment' ? (
+                isExporting ? (
+                  <ChannelSentimentSlide
+                    config={config}
+                    platform="tiktok"
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_fb_sentiment' ? (
+                isExporting ? (
+                  <ChannelSentimentSlide
+                    config={config}
+                    platform="facebook"
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_ig_growth' ? (
+                isExporting ? (
+                  <IgGrowthSlide
+                    config={config}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_ig_best_least' ? (
+                isExporting ? (
+                  <IgBestLeastSlide
+                    config={config}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_ig_content_pillar' ? (
+                isExporting ? (
+                  <IgContentPillarSlide
+                    config={config}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    pillarOffset={slide.content?.pillarOffset ?? 0}
+                  />
+                ) : null
+              ) : slide.type === 'ic_ig_tagged_post' ? (
+                isExporting ? (
+                  <IgTaggedPostSlide
+                    config={config}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_tt_growth' ? (
+                isExporting ? (
+                  <TtGrowthSlide
+                    config={config}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_tt_organic_best_least' ? (
+                isExporting ? (
+                  <TtBestLeastSlide
+                    config={config}
+                    mode="organic"
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_tt_paid_best_least' ? (
+                isExporting ? (
+                  <TtBestLeastSlide
+                    config={config}
+                    mode="paid"
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_tt_content_pillar' ? (
+                isExporting ? (
+                  <TtContentPillarSlide
+                    config={config}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_ig_cp_eng_aon' ? (
+                isExporting ? (
+                  <IgCpEngSlide
+                    config={config}
+                    aon={true}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_ig_cp_eng_nonaon' ? (
+                isExporting ? (
+                  <IgCpEngSlide
+                    config={config}
+                    aon={false}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_ig_cp_reach_aon' ? (
+                isExporting ? (
+                  <IgCpReachSlide
+                    config={config}
+                    aon={true}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_ig_cp_reach_nonaon' ? (
+                isExporting ? (
+                  <IgCpReachSlide
+                    config={config}
+                    aon={false}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_tw_growth' ? (
+                isExporting ? (
+                  <TwGrowthSlide
+                    config={config}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_tw_best_least' ? (
+                isExporting ? (
+                  <TwBestLeastSlide
+                    config={config}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_tw_content' ? (
+                isExporting ? (
+                  <TwContentSlide
+                    config={config}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_fb_growth' ? (
+                isExporting ? (
+                  <FbGrowthSlide
+                    config={config}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_comp_overview' ? (
+                isExporting ? (
+                  <CompetitorOverviewSlide
+                    config={config}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_comp_detail' ? (
+                isExporting ? (
+                  <CompetitorDetailSlide
+                    config={config}
+                    competitor={slide.content?.competitor ?? null}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'ic_comp_ig_focus' ? (
+                isExporting ? (
+                  <CompetitorIgFocusSlide
+                    config={config}
+                    competitor={slide.content?.competitor ?? null}
+                    isThumbnail={false}
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                  />
+                ) : null
+              ) : slide.type === 'thank_you' ? (
+                isExporting ? (
+                  config.coverDesign ? (
+                    <ThankYouSlide config={config} />
+                  ) : null
+                ) : null
               ) : (
                 <PlaceholderSlide onOpenSelector={() => {}} />
               )}
@@ -1517,7 +1973,7 @@ const ReportSetupInterface: React.FC = () => {
             <h3 className="text-2xl font-bold mb-4">Start Your Report</h3>
             <p className="text-slate-600 mb-6">Choose how you want to begin</p>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               {/* Start from scratch */}
               <button
                 onClick={() => {
@@ -1535,6 +1991,259 @@ const ReportSetupInterface: React.FC = () => {
                 </div>
                 <h4 className="font-bold text-slate-900 mb-2">Start Fresh</h4>
                 <p className="text-sm text-slate-600">Begin with an empty report</p>
+              </button>
+
+              {/* InnerCircle Template */}
+              <button
+                onClick={async () => {
+                  clearCurrentWorkOnly();
+                  const baseSlides: Slide[] = [
+                    { id: 1, type: 'cover', title: 'Report Cover', content: {} },
+                    {
+                      id: 2,
+                      type: 'section_heading',
+                      title: 'Chapter 1 : General Overview',
+                      content: { sectionTitle: 'Chapter 1 : General Overview' },
+                    },
+                    { id: 3, type: 'ic_all_overview', title: 'All Channel Overview', content: {} },
+                    {
+                      id: 4,
+                      type: 'ic_all_sentiment',
+                      title: 'All Channel Sentiment',
+                      content: {},
+                    },
+                    {
+                      id: 5,
+                      type: 'ic_ig_sentiment',
+                      title: 'Instagram Sentiment',
+                      content: {},
+                    },
+                    {
+                      id: 6,
+                      type: 'ic_tt_sentiment',
+                      title: 'TikTok Sentiment',
+                      content: {},
+                    },
+                    {
+                      id: 7,
+                      type: 'ic_fb_sentiment',
+                      title: 'Facebook Sentiment',
+                      content: {},
+                    },
+                    {
+                      id: 8,
+                      type: 'section_heading',
+                      title: 'Chapter 2: Instagram Section',
+                      content: { sectionTitle: 'Chapter 2: Instagram Section' },
+                    },
+                    {
+                      id: 9,
+                      type: 'ic_ig_growth',
+                      title: 'Instagram Growth',
+                      content: {},
+                    },
+                    {
+                      id: 10,
+                      type: 'ic_ig_best_least',
+                      title: 'Instagram Best & Least',
+                      content: {},
+                    },
+                    {
+                      id: 11,
+                      type: 'ic_ig_content_pillar',
+                      title: 'Instagram Content Pillar',
+                      content: {},
+                    },
+                    {
+                      id: 120,
+                      type: 'ic_ig_cp_eng_aon',
+                      title: 'IG Content Pillar — Engagement (AON)',
+                      content: {},
+                    },
+                    {
+                      id: 121,
+                      type: 'ic_ig_cp_eng_nonaon',
+                      title: 'IG Content Pillar — Engagement (Non-AON)',
+                      content: {},
+                    },
+                    {
+                      id: 122,
+                      type: 'ic_ig_cp_reach_aon',
+                      title: 'IG Content Pillar — Reach (AON)',
+                      content: {},
+                    },
+                    {
+                      id: 123,
+                      type: 'ic_ig_cp_reach_nonaon',
+                      title: 'IG Content Pillar — Reach (Non-AON)',
+                      content: {},
+                    },
+                    {
+                      id: 12,
+                      type: 'ic_ig_tagged_post',
+                      title: 'Instagram Tagged Post',
+                      content: {},
+                    },
+                    {
+                      id: 13,
+                      type: 'section_heading',
+                      title: 'Chapter 3: TikTok Section',
+                      content: { sectionTitle: 'Chapter 3: TikTok Section' },
+                    },
+                    {
+                      id: 14,
+                      type: 'ic_tt_growth',
+                      title: 'TikTok Growth',
+                      content: {},
+                    },
+                    {
+                      id: 15,
+                      type: 'ic_tt_organic_best_least',
+                      title: 'TikTok Organic Best & Least',
+                      content: {},
+                    },
+                    {
+                      id: 16,
+                      type: 'ic_tt_paid_best_least',
+                      title: 'TikTok Paid Best & Least',
+                      content: {},
+                    },
+                    {
+                      id: 17,
+                      type: 'ic_tt_content_pillar',
+                      title: 'TikTok Content Pillar',
+                      content: {},
+                    },
+                    {
+                      id: 18,
+                      type: 'section_heading',
+                      title: 'Chapter 4: Twitter/X Section',
+                      content: { sectionTitle: 'Chapter 4: Twitter/X Section' },
+                    },
+                    {
+                      id: 19,
+                      type: 'ic_tw_growth',
+                      title: 'Twitter Growth',
+                      content: {},
+                    },
+                    {
+                      id: 20,
+                      type: 'ic_tw_content',
+                      title: 'Twitter Content Overview',
+                      content: {},
+                    },
+                    {
+                      id: 21,
+                      type: 'ic_tw_best_least',
+                      title: 'Twitter Best & Least',
+                      content: {},
+                    },
+                    {
+                      id: 22,
+                      type: 'section_heading',
+                      title: 'Chapter 5: Facebook Section',
+                      content: { sectionTitle: 'Chapter 5: Facebook Section' },
+                    },
+                    {
+                      id: 23,
+                      type: 'ic_fb_growth',
+                      title: 'Facebook Growth',
+                      content: {},
+                    },
+                    {
+                      id: 24,
+                      type: 'section_heading',
+                      title: 'Chapter 6: Competitor Analysis',
+                      content: { sectionTitle: 'Chapter 6: Competitor Analysis' },
+                    },
+                    {
+                      id: 25,
+                      type: 'ic_comp_overview',
+                      title: 'Competitor Overview',
+                      content: {},
+                    },
+                  ];
+
+                  // Pre-fetch competitor list to create one slide per competitor for ch6 & ch7
+                  let compDetailSlides: Slide[] = [];
+                  let compIgFocusSlides: Slide[] = [];
+                  try {
+                    const r = await fetch(
+                      `/api/innercircle/competitor-overview?brand=${encodeURIComponent(config.clientName)}&period=${encodeURIComponent(config.period)}`,
+                    );
+                    const d = await r.json();
+                    const allComp: string[] = d.allCompetitors || [];
+                    if (allComp.length > 0) {
+                      compDetailSlides = allComp.map((comp, i) => ({
+                        id: 26 + i,
+                        type: 'ic_comp_detail' as const,
+                        title: `Competitor Detail — ${comp}`,
+                        content: { competitor: comp },
+                      }));
+                      const ch7Base = 26 + allComp.length;
+                      compIgFocusSlides = [
+                        {
+                          id: ch7Base,
+                          type: 'section_heading' as const,
+                          title: 'Chapter 7: Competitor Instagram Focus',
+                          content: { sectionTitle: 'Chapter 7: Competitor Instagram Focus' },
+                        },
+                        ...allComp.map((comp, i) => ({
+                          id: ch7Base + 1 + i,
+                          type: 'ic_comp_ig_focus' as const,
+                          title: `IG Focus — ${comp}`,
+                          content: { competitor: comp },
+                        })),
+                      ];
+                    }
+                  } catch {}
+
+                  if (compDetailSlides.length === 0) {
+                    compDetailSlides = [
+                      {
+                        id: 26,
+                        type: 'ic_comp_detail' as const,
+                        title: 'Competitor Detail',
+                        content: {},
+                      },
+                    ];
+                    compIgFocusSlides = [
+                      {
+                        id: 27,
+                        type: 'section_heading' as const,
+                        title: 'Chapter 7: Competitor Instagram Focus',
+                        content: { sectionTitle: 'Chapter 7: Competitor Instagram Focus' },
+                      },
+                      {
+                        id: 28,
+                        type: 'ic_comp_ig_focus' as const,
+                        title: 'IG Focus',
+                        content: {},
+                      },
+                    ];
+                  }
+
+                  setSlides([
+                    ...baseSlides,
+                    ...compDetailSlides,
+                    ...compIgFocusSlides,
+                    {
+                      id: 9999,
+                      type: 'thank_you' as const,
+                      title: 'Thank You',
+                      content: {},
+                    },
+                  ]);
+                  setIsTemplateSelectionOpen(false);
+                  setCurrentStep('review');
+                }}
+                className="p-6 border-2 border-slate-200 rounded-xl hover:border-emerald-500 hover:bg-emerald-50/50 transition-all group"
+              >
+                <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3 group-hover:bg-emerald-200 transition-colors">
+                  <Layout size={24} className="text-emerald-600" />
+                </div>
+                <h4 className="font-bold text-slate-900 mb-2">InnerCircle</h4>
+                <p className="text-sm text-slate-600">Social media report template</p>
               </button>
 
               {/* Load from template */}
@@ -1614,6 +2323,101 @@ const ReportSetupInterface: React.FC = () => {
             >
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* DEBUG EXPORT MODAL */}
+      {showDebugModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-[480px] max-h-[80vh] flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="bg-amber-50 text-amber-500 p-1.5 rounded-lg">
+                  <FlaskConical size={16} />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900">Debug Export</h2>
+                  <p className="text-[10px] text-slate-400">
+                    Select which slides to export as PPTX
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDebugModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Select all / none bar */}
+            <div className="flex items-center gap-3 px-5 py-2 bg-slate-50 border-b border-slate-100">
+              <button
+                onClick={() => setDebugSelectedIds(new Set(slides.map((s) => s.id)))}
+                className="text-[11px] font-bold text-indigo-600 hover:underline"
+              >
+                Select All
+              </button>
+              <span className="text-slate-300">|</span>
+              <button
+                onClick={() => setDebugSelectedIds(new Set())}
+                className="text-[11px] font-bold text-slate-500 hover:underline"
+              >
+                Deselect All
+              </button>
+              <span className="ml-auto text-[11px] text-slate-400">
+                {debugSelectedIds.size} / {slides.length} selected
+              </span>
+            </div>
+
+            {/* Slide list */}
+            <div className="overflow-y-auto flex-1 divide-y divide-slate-50">
+              {slides.map((s, idx) => (
+                <label
+                  key={s.id}
+                  className="flex items-center gap-3 px-5 py-2.5 hover:bg-slate-50 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={debugSelectedIds.has(s.id)}
+                    onChange={(e) => {
+                      const next = new Set(debugSelectedIds);
+                      if (e.target.checked) next.add(s.id);
+                      else next.delete(s.id);
+                      setDebugSelectedIds(next);
+                    }}
+                    className="w-4 h-4 accent-indigo-600 shrink-0"
+                  />
+                  <span className="text-[11px] text-slate-400 w-5 shrink-0">{idx + 1}</span>
+                  <span className="text-[11px] font-medium text-slate-700 truncate">
+                    {s.title || `Slide ${idx + 1}`}
+                  </span>
+                  <span className="ml-auto text-[10px] text-slate-400 shrink-0 bg-slate-100 px-1.5 py-0.5 rounded">
+                    {s.type}
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-100 bg-slate-50">
+              <button
+                onClick={() => setShowDebugModal(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDebugExport}
+                disabled={debugSelectedIds.size === 0}
+                className="flex items-center gap-2 px-4 py-2 text-xs font-bold bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <Download size={13} />
+                Export {debugSelectedIds.size} Slide{debugSelectedIds.size !== 1 ? 's' : ''}
+              </button>
+            </div>
           </div>
         </div>
       )}

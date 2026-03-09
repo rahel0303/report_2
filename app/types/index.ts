@@ -52,7 +52,32 @@ export type SlideType =
   | 'layout_content'
   | 'layout_overview'
   | 'layout_custom'
-  | 'section_heading';
+  | 'section_heading'
+  | 'ic_all_overview'
+  | 'ic_all_sentiment'
+  | 'ic_ig_sentiment'
+  | 'ic_tt_sentiment'
+  | 'ic_fb_sentiment'
+  | 'ic_ig_growth'
+  | 'ic_ig_best_least'
+  | 'ic_ig_content_pillar'
+  | 'ic_ig_tagged_post'
+  | 'ic_tt_growth'
+  | 'ic_tt_organic_best_least'
+  | 'ic_tt_paid_best_least'
+  | 'ic_tt_content_pillar'
+  | 'ic_ig_cp_eng_aon'
+  | 'ic_ig_cp_eng_nonaon'
+  | 'ic_ig_cp_reach_aon'
+  | 'ic_ig_cp_reach_nonaon'
+  | 'ic_tw_growth'
+  | 'ic_tw_best_least'
+  | 'ic_tw_content'
+  | 'ic_fb_growth'
+  | 'ic_comp_overview'
+  | 'ic_comp_detail'
+  | 'ic_comp_ig_focus'
+  | 'thank_you';
 
 export interface Slide {
   id: number;

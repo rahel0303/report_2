@@ -1,6 +1,57 @@
 import PptxGenJS from 'pptxgenjs';
 import { ReportConfig, Slide } from '@/app/types';
 
+/** Fetch a remote image URL and return a base64 data URI for embedding in PPTX */
+async function imageUrlToBase64(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** For a list of posts, resolve missing image_urls via thumbnail API, then convert all to base64 */
+async function resolvePostImages(
+  posts: any[],
+  channel = 'instagram',
+): Promise<any[]> {
+  return Promise.all(
+    posts.map(async (post) => {
+      let image_url: string | null = post.image_url || null;
+
+      // If not cached yet, fetch via API (triggers Apify/oEmbed + Cloudinary if needed)
+      if (!image_url && post.url) {
+        try {
+          const endpoint =
+            channel === 'tiktok'
+              ? `/api/innercircle/tt-thumbnail?url=${encodeURIComponent(post.url)}`
+              : channel === 'twitter'
+              ? `/api/innercircle/tw-thumbnail?url=${encodeURIComponent(post.url)}`
+              : `/api/innercircle/ig-thumbnail?url=${encodeURIComponent(post.url)}&channel=${channel}`;
+          const res = await fetch(endpoint);
+          const d = await res.json();
+          image_url = d.image_url || null;
+        } catch {
+          image_url = null;
+        }
+      }
+
+      // Convert to base64 for reliable PPTX embedding
+      const image_b64 = image_url ? await imageUrlToBase64(image_url) : null;
+
+      return { ...post, image_url: image_b64 };
+    }),
+  );
+}
+
 /**
  * Post-process a PPTX ArrayBuffer to embed Sora TTF fonts inside the ZIP.
  * Uses JSZip to inject font data + OOXML relationships + embFontLst element.
@@ -209,6 +260,77 @@ export const handleDownload = async (
             // No DOM element available – use native fallback
             const { createCoverSlide } = await import('./pptxExporter');
             createCoverSlide(pptx, config);
+          }
+          continue;
+        }
+
+        // Thank You slide: same hybrid approach as cover
+        if (slide.type === 'thank_you') {
+          const exportDiv = document.querySelector(
+            `[data-slide-id="${slide.id}"][data-slide-export="true"]`,
+          ) as HTMLElement;
+
+          if (exportDiv && config.coverDesign) {
+            try {
+              await new Promise((resolve) => setTimeout(resolve, 500));
+
+              const bgImage = await toPng(exportDiv, {
+                cacheBust: true,
+                width: 1920,
+                height: 1080,
+                pixelRatio: 2,
+                filter: (node) => {
+                  if (node instanceof HTMLElement && node.hasAttribute('data-cover-content')) {
+                    return false;
+                  }
+                  if (node.nodeName === 'SCRIPT' || node.nodeName === 'NOSCRIPT') return false;
+                  return true;
+                },
+                style: {
+                  transform: 'scale(1)',
+                  transformOrigin: 'top left',
+                  position: 'relative',
+                  left: '0',
+                  top: '0',
+                  margin: '0',
+                  padding: '0',
+                },
+              });
+
+              const { createThankYouSlideHybrid } = await import('./pptxExporter');
+              await createThankYouSlideHybrid(pptx, config, bgImage);
+              console.log(`✅ Thank You slide captured (hybrid)`);
+            } catch (error) {
+              console.error('Thank You slide export failed, falling back to screenshot:', error);
+              // Screenshot fallback — just capture as image
+              try {
+                const imgData = await toPng(exportDiv, {
+                  cacheBust: true,
+                  width: 1920,
+                  height: 1080,
+                  pixelRatio: 2,
+                });
+                const pptxSlide = pptx.addSlide();
+                pptxSlide.addImage({ data: imgData, x: 0, y: 0, w: '100%', h: '100%' });
+              } catch {}
+            }
+          } else {
+            // No DOM element — minimal native fallback
+            const pptxSlide = pptx.addSlide();
+            const primaryColor = config.coverDesign?.colors?.primary?.replace('#', '') || '3B82F6';
+            pptxSlide.background = { color: primaryColor };
+            pptxSlide.addText('Thank You', {
+              x: 0,
+              y: 1.8,
+              w: 10,
+              h: 2,
+              fontSize: 60,
+              bold: true,
+              color: 'FFFFFF',
+              align: 'center',
+              valign: 'middle',
+              fontFace: config.font?.name || 'Inter',
+            });
           }
           continue;
         }
@@ -892,6 +1014,841 @@ export const handleDownload = async (
                 align: 'center',
               });
             }
+          }
+          continue;
+        }
+
+        // ── InnerCircle slides: hybrid (native PPTX + screenshots for wordclouds) ─
+        if (slide.type.startsWith('ic_')) {
+          const exportDiv = document.querySelector(
+            `[data-slide-id="${slide.id}"][data-slide-export="true"]`,
+          ) as HTMLElement;
+
+          if (exportDiv) {
+            try {
+              // Wait for API data + recharts render + react-d3-cloud layout
+              await new Promise((resolve) => setTimeout(resolve, 3000));
+
+              // ── ic_all_overview: native table + insight ──────────────────
+              if (slide.type === 'ic_all_overview') {
+                const tableEl = exportDiv.querySelector('[data-ic-table]');
+                const tableHeaders: string[] = [];
+                type MetricCell = { base: string; pct: string; positive: boolean | null };
+                const tableRows: (string | MetricCell)[][] = [];
+                if (tableEl) {
+                  tableEl.querySelectorAll('thead th').forEach((th) => {
+                    tableHeaders.push(th.textContent?.trim() || '');
+                  });
+                  tableEl.querySelectorAll('tbody tr').forEach((row) => {
+                    const cells: (string | MetricCell)[] = [];
+                    row.querySelectorAll('td').forEach((td) => {
+                      // MetricCell has a percentage span badge (text contains %)
+                      const spanEl = td.querySelector('span');
+                      const divs = td.querySelectorAll('div');
+                      const spanText = spanEl?.textContent?.trim() || '';
+                      if (spanEl && divs.length >= 1 && spanText.includes('%')) {
+                        const base = divs[0].textContent?.trim() || '';
+                        const pct = spanText;
+                        const positive = pct.startsWith('+')
+                          ? true
+                          : pct.startsWith('-')
+                            ? false
+                            : null;
+                        cells.push({ base, pct, positive });
+                      } else {
+                        cells.push(td.textContent?.trim() || '');
+                      }
+                    });
+                    if (cells.length > 0) tableRows.push(cells);
+                  });
+                }
+
+                const insightEl = exportDiv.querySelector('[data-ic-insight]');
+                const insightText = insightEl?.textContent?.trim() || '';
+
+                const { createIcAllOverviewNative } = await import('./pptxExporter');
+                createIcAllOverviewNative(pptx, config, {
+                  tableHeaders,
+                  tableRows,
+                  insightText,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_all_overview created (native)`);
+              }
+
+              // ── ic_all_sentiment: native chart + sentiment boxes + wc screenshot ─
+              else if (slide.type === 'ic_all_sentiment') {
+                const chartEl = exportDiv.querySelector('[data-ic-chart]') as HTMLElement;
+                let chartData: any = null;
+                if (chartEl) {
+                  const { extractChartInfo } = await import('./pptxExporter');
+                  chartData = extractChartInfo(chartEl);
+                }
+
+                const wcEl = exportDiv.querySelector('[data-ic-wc]') as HTMLElement | null;
+                let wcImage = '';
+                if (wcEl) {
+                  wcImage = await toPng(wcEl, {
+                    cacheBust: true,
+                    pixelRatio: 2,
+                    backgroundColor: '#ffffff',
+                  });
+                }
+
+                const totalsEl = exportDiv.querySelector('[data-ic-totals]');
+                let totals: {
+                  positive_pct: number;
+                  neutral_pct: number;
+                  negative_pct: number;
+                } | null = null;
+                if (totalsEl) {
+                  try {
+                    totals = JSON.parse(totalsEl.getAttribute('data-ic-totals') || '{}');
+                  } catch {
+                    /* ignore parse error */
+                  }
+                }
+
+                const { createIcAllSentimentHybrid } = await import('./pptxExporter');
+                createIcAllSentimentHybrid(pptx, config, {
+                  chartData,
+                  wcImage,
+                  totals,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_all_sentiment created (hybrid)`);
+              }
+
+              // ── ic_ig/tt/fb_sentiment: native chart + 3 wc screenshots ───
+              else if (
+                slide.type === 'ic_ig_sentiment' ||
+                slide.type === 'ic_tt_sentiment' ||
+                slide.type === 'ic_fb_sentiment'
+              ) {
+                const PLATFORM_MAP: Record<string, { label: string; color: string }> = {
+                  ic_ig_sentiment: { label: 'Instagram', color: 'E1306C' },
+                  ic_tt_sentiment: { label: 'TikTok', color: '010101' },
+                  ic_fb_sentiment: { label: 'Facebook', color: '1877F2' },
+                };
+                const platformInfo = PLATFORM_MAP[slide.type];
+
+                const chartEl = exportDiv.querySelector('[data-ic-chart]') as HTMLElement;
+                let chartData: any = null;
+                if (chartEl) {
+                  const { extractChartInfo } = await import('./pptxExporter');
+                  chartData = extractChartInfo(chartEl);
+                }
+
+                const screenshotWC = async (selector: string): Promise<string> => {
+                  const el = exportDiv.querySelector(selector) as HTMLElement | null;
+                  if (!el) return '';
+                  try {
+                    return await toPng(el, {
+                      cacheBust: true,
+                      pixelRatio: 2,
+                      backgroundColor: '#ffffff',
+                    });
+                  } catch {
+                    return '';
+                  }
+                };
+
+                const [wcNeutral, wcPositive, wcNegative] = await Promise.all([
+                  screenshotWC('[data-ic-wc-neutral]'),
+                  screenshotWC('[data-ic-wc-positive]'),
+                  screenshotWC('[data-ic-wc-negative]'),
+                ]);
+
+                const { createIcChannelSentimentHybrid } = await import('./pptxExporter');
+                createIcChannelSentimentHybrid(pptx, config, {
+                  platform: platformInfo.label,
+                  platformColor: platformInfo.color,
+                  chartData,
+                  wcNeutral,
+                  wcPositive,
+                  wcNegative,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ${slide.type} created (hybrid)`);
+              }
+
+              // ── ic_ig_growth: native dual-axis chart + analysis + table ───
+              else if (slide.type === 'ic_ig_growth') {
+                const chartEl = exportDiv.querySelector('[data-ic-chart]') as HTMLElement;
+                let chartData: any = null;
+                if (chartEl) {
+                  const { extractChartInfo } = await import('./pptxExporter');
+                  chartData = extractChartInfo(chartEl);
+                }
+
+                const tableEl = exportDiv.querySelector('[data-ic-ig-table]');
+                const tableHeaders: string[] = [];
+                const tableRows: string[][] = [];
+                if (tableEl) {
+                  tableEl.querySelectorAll('thead th').forEach((th) => {
+                    tableHeaders.push(th.textContent?.trim() || '');
+                  });
+                  tableEl.querySelectorAll('tbody tr').forEach((row) => {
+                    const cells: string[] = [];
+                    row
+                      .querySelectorAll('td')
+                      .forEach((td) => cells.push(td.textContent?.trim() || ''));
+                    if (cells.length > 0) tableRows.push(cells);
+                  });
+                }
+
+                const insightEl = exportDiv.querySelector('[data-ic-insight]');
+                const insightText = insightEl?.textContent?.trim() || '';
+
+                const { createIcIgGrowthNative } = await import('./pptxExporter');
+                createIcIgGrowthNative(pptx, config, {
+                  chartData,
+                  tableHeaders,
+                  tableRows,
+                  insightText,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_ig_growth created (native)`);
+              }
+
+              // ── ic_ig_content_pillar: native post cards + insight boxes ──
+              else if (slide.type === 'ic_ig_content_pillar') {
+                const dataEl = exportDiv.querySelector(
+                  '[data-ic-content-pillar]',
+                ) as HTMLElement | null;
+                let pillars: any[] = [];
+                if (dataEl) {
+                  try {
+                    pillars = JSON.parse(dataEl.getAttribute('data-ic-content-pillar') || '[]');
+                  } catch {}
+                }
+
+                // Fallback: fetch from API if slide was never opened
+                if (pillars.length === 0 && config.clientName && config.period) {
+                  try {
+                    const apiRes = await fetch(
+                      `/api/innercircle/ig-content-pillar?brand=${encodeURIComponent(config.clientName)}&period=${encodeURIComponent(config.period)}`,
+                    );
+                    const apiData = await apiRes.json();
+                    pillars = (apiData.pillars || []).map((p: any) => ({
+                      pillar: p.pillar,
+                      lowest: p.lowest,
+                      highest: p.highest,
+                      insight: '',
+                    }));
+                  } catch {}
+                }
+
+                // Resolve images for all posts in all pillars
+                pillars = await Promise.all(
+                  pillars.map(async (p: any) => ({
+                    ...p,
+                    lowest: await resolvePostImages(p.lowest || []),
+                    highest: await resolvePostImages(p.highest || []),
+                  })),
+                );
+
+                const { createIcIgContentPillarNative } = await import('./pptxExporter');
+                createIcIgContentPillarNative(pptx, config, {
+                  pillars,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_ig_content_pillar created (native)`);
+              }
+
+              // ── ic_ig_tagged_post: native post cards + KPIs + sentiment ─
+              else if (slide.type === 'ic_ig_tagged_post') {
+                const dataEl = exportDiv.querySelector(
+                  '[data-ic-tagged-posts]',
+                ) as HTMLElement | null;
+                let posts: any[] = [];
+                let summary: any = null;
+                let sentiments: any = { Negative: [], Positive: [], Neutral: [] };
+                if (dataEl) {
+                  try {
+                    posts = JSON.parse(dataEl.getAttribute('data-ic-tagged-posts') || '[]');
+                  } catch {}
+                  try {
+                    summary = JSON.parse(dataEl.getAttribute('data-ic-tagged-summary') || 'null');
+                  } catch {}
+                  try {
+                    sentiments = JSON.parse(
+                      dataEl.getAttribute('data-ic-tagged-sentiments') || '{}',
+                    );
+                  } catch {}
+                }
+                // Fallback: fetch from API if slide was never opened
+                if (posts.length === 0 && config.clientName && config.period) {
+                  try {
+                    const apiRes = await fetch(
+                      `/api/innercircle/ig-tagged-post?brand=${encodeURIComponent(config.clientName)}&period=${encodeURIComponent(config.period)}`,
+                    );
+                    const apiData = await apiRes.json();
+                    posts = apiData.posts || [];
+                    summary = summary || apiData.summary || null;
+                    sentiments = sentiments || apiData.sentiments || { Negative: [], Positive: [], Neutral: [] };
+                  } catch {}
+                }
+
+                // Resolve images + convert to base64
+                posts = await resolvePostImages(posts);
+
+                const { createIcIgTaggedPostNative } = await import('./pptxExporter');
+                createIcIgTaggedPostNative(pptx, config, {
+                  posts,
+                  summary,
+                  sentiments,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_ig_tagged_post created (native)`);
+              }
+
+              // ── ic_ig_cp_eng (AON & Non-AON Engagement/Post per Pillar) ─
+              else if (slide.type === 'ic_ig_cp_eng_aon' || slide.type === 'ic_ig_cp_eng_nonaon') {
+                const dataEl = exportDiv.querySelector('[data-ig-cp-eng]') as HTMLElement | null;
+                let cpEngData: any = null;
+                if (dataEl) {
+                  try {
+                    cpEngData = JSON.parse(dataEl.getAttribute('data-ig-cp-eng') || 'null');
+                  } catch {}
+                }
+                if (cpEngData) {
+                  const { createIcIgCpEngNative } = await import('./pptxExporter');
+                  createIcIgCpEngNative(pptx, config, {
+                    ...cpEngData,
+                    currentPage: i + 1,
+                    totalPages: slides.length,
+                  });
+                  console.log(`✅ ${slide.type} created (native)`);
+                } else {
+                  console.warn(`⚠️ ${slide.type}: no data found, skipping`);
+                }
+              }
+
+              // ── ic_ig_cp_reach (AON & Non-AON Reach/ER per Pillar) ──────
+              else if (
+                slide.type === 'ic_ig_cp_reach_aon' ||
+                slide.type === 'ic_ig_cp_reach_nonaon'
+              ) {
+                const dataEl = exportDiv.querySelector('[data-ig-cp-reach]') as HTMLElement | null;
+                let cpReachData: any = null;
+                if (dataEl) {
+                  try {
+                    cpReachData = JSON.parse(dataEl.getAttribute('data-ig-cp-reach') || 'null');
+                  } catch {}
+                }
+                if (cpReachData) {
+                  const { createIcIgCpReachNative } = await import('./pptxExporter');
+                  createIcIgCpReachNative(pptx, config, {
+                    ...cpReachData,
+                    currentPage: i + 1,
+                    totalPages: slides.length,
+                  });
+                  console.log(`✅ ${slide.type} created (native)`);
+                } else {
+                  console.warn(`⚠️ ${slide.type}: no data found, skipping`);
+                }
+              }
+
+              // ── ic_ig_best_least: native post cards + analysis boxes ───
+              else if (slide.type === 'ic_ig_best_least') {
+                const dataEl = exportDiv.querySelector('[data-ic-best-data]') as HTMLElement | null;
+                let best: any[] = [];
+                let least: any[] = [];
+                let bestAnalysis = '';
+                let leastAnalysis = '';
+                if (dataEl) {
+                  try {
+                    best = JSON.parse(dataEl.getAttribute('data-ic-best-data') || '[]');
+                  } catch {}
+                  try {
+                    least = JSON.parse(dataEl.getAttribute('data-ic-least-data') || '[]');
+                  } catch {}
+                  bestAnalysis = dataEl.getAttribute('data-ic-best-analysis') || '';
+                  leastAnalysis = dataEl.getAttribute('data-ic-least-analysis') || '';
+                }
+
+                // If no DOM data (slide never opened), fetch from API directly
+                if (best.length === 0 && least.length === 0 && config.clientName && config.period) {
+                  try {
+                    const apiRes = await fetch(
+                      `/api/innercircle/ig-best-least?brand=${encodeURIComponent(config.clientName)}&period=${encodeURIComponent(config.period)}`,
+                    );
+                    const apiData = await apiRes.json();
+                    best = apiData.best || [];
+                    least = apiData.least || [];
+                  } catch {}
+                }
+
+                // Resolve missing images + convert all to base64 for PPTX embedding
+                [best, least] = await Promise.all([
+                  resolvePostImages(best),
+                  resolvePostImages(least),
+                ]);
+
+                const { createIcIgBestLeastNative } = await import('./pptxExporter');
+                createIcIgBestLeastNative(pptx, config, {
+                  best,
+                  least,
+                  bestAnalysis,
+                  leastAnalysis,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_ig_best_least created (native)`);
+              }
+
+              // ── ic_tt_growth: native chart + table + insight ───────────
+              else if (slide.type === 'ic_tt_growth') {
+                const dataEl = exportDiv.querySelector('[data-ic-tt-chart]') as HTMLElement | null;
+                let chartData: any[] = [];
+                let tableRows: any[] = [];
+                let insight = '';
+                if (dataEl) {
+                  try {
+                    chartData = JSON.parse(dataEl.getAttribute('data-ic-tt-chart') || '[]');
+                  } catch {}
+                  try {
+                    tableRows = JSON.parse(dataEl.getAttribute('data-ic-tt-table') || '[]');
+                  } catch {}
+                  insight = dataEl.getAttribute('data-ic-tt-insight') || '';
+                }
+                const { createIcTtGrowthNative } = await import('./pptxExporter');
+                createIcTtGrowthNative(pptx, config, {
+                  chartData,
+                  tableRows,
+                  insight,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_tt_growth created (native)`);
+              }
+
+              // ── ic_tt_organic_best_least / ic_tt_paid_best_least ───────
+              else if (
+                slide.type === 'ic_tt_organic_best_least' ||
+                slide.type === 'ic_tt_paid_best_least'
+              ) {
+                const dataEl = exportDiv.querySelector(
+                  '[data-ic-tt-highest]',
+                ) as HTMLElement | null;
+                let highest: any[] = [];
+                let lowest: any[] = [];
+                let bestAllTime: any = null;
+                let insight = '';
+                let mode = slide.type === 'ic_tt_paid_best_least' ? 'paid' : 'organic';
+                if (dataEl) {
+                  try {
+                    highest = JSON.parse(dataEl.getAttribute('data-ic-tt-highest') || '[]');
+                  } catch {}
+                  try {
+                    lowest = JSON.parse(dataEl.getAttribute('data-ic-tt-lowest') || '[]');
+                  } catch {}
+                  try {
+                    bestAllTime = JSON.parse(dataEl.getAttribute('data-ic-tt-best') || 'null');
+                  } catch {}
+                  insight = dataEl.getAttribute('data-ic-tt-insight') || '';
+                  mode = (dataEl.getAttribute('data-ic-tt-mode') as 'organic' | 'paid') || mode;
+                }
+
+                // Fallback: fetch from API if slide was never opened
+                if (highest.length === 0 && lowest.length === 0 && config.clientName && config.period) {
+                  try {
+                    const apiRes = await fetch(
+                      `/api/innercircle/tt-best-least?brand=${encodeURIComponent(config.clientName)}&period=${encodeURIComponent(config.period)}&mode=${mode}`,
+                    );
+                    const apiData = await apiRes.json();
+                    highest = apiData.highest || [];
+                    lowest = apiData.lowest || [];
+                    bestAllTime = apiData.best_all_time || null;
+                  } catch {}
+                }
+
+                // Resolve TikTok thumbnails + convert to base64
+                [highest, lowest] = await Promise.all([
+                  resolvePostImages(highest, 'tiktok'),
+                  resolvePostImages(lowest, 'tiktok'),
+                ]);
+                if (bestAllTime?.url && !bestAllTime.image_url) {
+                  const [resolved] = await resolvePostImages([bestAllTime], 'tiktok');
+                  bestAllTime = resolved;
+                } else if (bestAllTime?.image_url) {
+                  const b64 = await imageUrlToBase64(bestAllTime.image_url);
+                  bestAllTime = { ...bestAllTime, image_url: b64 };
+                }
+
+                const { createIcTtBestLeastNative } = await import('./pptxExporter');
+                createIcTtBestLeastNative(pptx, config, {
+                  highest,
+                  lowest,
+                  bestAllTime,
+                  insight,
+                  mode: mode as 'organic' | 'paid',
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ${slide.type} created (native)`);
+              }
+
+              // ── ic_tt_content_pillar: native pillar rows + insight ─────
+              else if (slide.type === 'ic_tt_content_pillar') {
+                const dataEl = exportDiv.querySelector(
+                  '[data-ic-tt-cp-pillars]',
+                ) as HTMLElement | null;
+                let pillars: any[] = [];
+                if (dataEl) {
+                  try {
+                    pillars = JSON.parse(dataEl.getAttribute('data-ic-tt-cp-pillars') || '[]');
+                  } catch {}
+                }
+
+                // Fallback: fetch from API if slide was never opened
+                if (pillars.length === 0 && config.clientName && config.period) {
+                  try {
+                    const apiRes = await fetch(
+                      `/api/innercircle/tt-content-pillar?brand=${encodeURIComponent(config.clientName)}&period=${encodeURIComponent(config.period)}`,
+                    );
+                    const apiData = await apiRes.json();
+                    pillars = (apiData.pillars || []).map((p: any) => ({
+                      pillar: p.pillar,
+                      posts: p.posts,
+                      insight: '',
+                    }));
+                  } catch {}
+                }
+
+                // Resolve TikTok thumbnails + convert to base64
+                pillars = await Promise.all(
+                  pillars.map(async (p: any) => ({
+                    ...p,
+                    posts: await resolvePostImages(p.posts || [], 'tiktok'),
+                  })),
+                );
+
+                const { createIcTtContentPillarNative } = await import('./pptxExporter');
+                createIcTtContentPillarNative(pptx, config, {
+                  pillars,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_tt_content_pillar created (native)`);
+              }
+
+              // ── ic_tw_growth: native charts + table + insight ──────────
+              else if (slide.type === 'ic_tw_growth') {
+                const dataEl = exportDiv.querySelector('[data-ic-tw-chart]') as HTMLElement | null;
+                let chartData: any[] = [];
+                let tableRows: any[] = [];
+                let insight = '';
+                if (dataEl) {
+                  try {
+                    chartData = JSON.parse(dataEl.getAttribute('data-ic-tw-chart') || '[]');
+                  } catch {}
+                  try {
+                    tableRows = JSON.parse(dataEl.getAttribute('data-ic-tw-table') || '[]');
+                  } catch {}
+                  insight = dataEl.getAttribute('data-ic-tw-insight') || '';
+                }
+                const { createIcTwGrowthNative } = await import('./pptxExporter');
+                createIcTwGrowthNative(pptx, config, {
+                  chartData,
+                  tableRows,
+                  insight,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_tw_growth created (native)`);
+              }
+
+              // ── ic_tw_best_least: native post cards + analysis ─────────
+              else if (slide.type === 'ic_tw_best_least') {
+                const dataEl = exportDiv.querySelector(
+                  '[data-ic-tw-bl-highest]',
+                ) as HTMLElement | null;
+                let highest: any[] = [];
+                let lowest: any[] = [];
+                let insight = '';
+                if (dataEl) {
+                  try {
+                    highest = JSON.parse(dataEl.getAttribute('data-ic-tw-bl-highest') || '[]');
+                  } catch {}
+                  try {
+                    lowest = JSON.parse(dataEl.getAttribute('data-ic-tw-bl-lowest') || '[]');
+                  } catch {}
+                  insight = dataEl.getAttribute('data-ic-tw-bl-insight') || '';
+                }
+
+                // Fallback: fetch from API if slide was never opened
+                if (highest.length === 0 && lowest.length === 0 && config.clientName && config.period) {
+                  try {
+                    const apiRes = await fetch(
+                      `/api/innercircle/tw-best-least?brand=${encodeURIComponent(config.clientName)}&period=${encodeURIComponent(config.period)}`,
+                    );
+                    const apiData = await apiRes.json();
+                    highest = apiData.highest || [];
+                    lowest = apiData.lowest || [];
+                  } catch {}
+                }
+
+                // Resolve Twitter thumbnails + convert to base64
+                [highest, lowest] = await Promise.all([
+                  resolvePostImages(highest, 'twitter'),
+                  resolvePostImages(lowest, 'twitter'),
+                ]);
+
+                const { createIcTwBestLeastNative } = await import('./pptxExporter');
+                createIcTwBestLeastNative(pptx, config, {
+                  highest,
+                  lowest,
+                  insight,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_tw_best_least created (native)`);
+              }
+
+              // ── ic_tw_content: native post cards + analysis ────────────
+              else if (slide.type === 'ic_tw_content') {
+                const dataEl = exportDiv.querySelector(
+                  '[data-ic-tw-ct-brand]',
+                ) as HTMLElement | null;
+                let brandOwned: any[] = [];
+                let nonBrandOwned: any[] = [];
+                let insight = '';
+                if (dataEl) {
+                  try {
+                    brandOwned = JSON.parse(dataEl.getAttribute('data-ic-tw-ct-brand') || '[]');
+                  } catch {}
+                  try {
+                    nonBrandOwned = JSON.parse(
+                      dataEl.getAttribute('data-ic-tw-ct-nonbrand') || '[]',
+                    );
+                  } catch {}
+                  insight = dataEl.getAttribute('data-ic-tw-ct-insight') || '';
+                }
+
+                // Fallback: fetch from API if slide was never opened
+                if (brandOwned.length === 0 && nonBrandOwned.length === 0 && config.clientName && config.period) {
+                  try {
+                    const apiRes = await fetch(
+                      `/api/innercircle/tw-content?brand=${encodeURIComponent(config.clientName)}&period=${encodeURIComponent(config.period)}`,
+                    );
+                    const apiData = await apiRes.json();
+                    brandOwned = apiData.brandOwned || [];
+                    nonBrandOwned = apiData.nonBrandOwned || [];
+                  } catch {}
+                }
+
+                // Resolve Twitter thumbnails + convert to base64
+                [brandOwned, nonBrandOwned] = await Promise.all([
+                  resolvePostImages(brandOwned, 'twitter'),
+                  resolvePostImages(nonBrandOwned, 'twitter'),
+                ]);
+
+                const { createIcTwContentNative } = await import('./pptxExporter');
+                createIcTwContentNative(pptx, config, {
+                  brandOwned,
+                  nonBrandOwned,
+                  insight,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_tw_content created (native)`);
+              }
+
+              // ── ic_fb_growth: native charts + table + insight ──────────
+              else if (slide.type === 'ic_fb_growth') {
+                const dataEl = exportDiv.querySelector('[data-ic-fb-chart]') as HTMLElement | null;
+                let chartData: any[] = [];
+                let tableRows: any[] = [];
+                let insight = '';
+                if (dataEl) {
+                  try {
+                    chartData = JSON.parse(dataEl.getAttribute('data-ic-fb-chart') || '[]');
+                  } catch {}
+                  try {
+                    tableRows = JSON.parse(dataEl.getAttribute('data-ic-fb-table') || '[]');
+                  } catch {}
+                  insight = dataEl.getAttribute('data-ic-fb-insight') || '';
+                }
+                const { createIcFbGrowthNative } = await import('./pptxExporter');
+                createIcFbGrowthNative(pptx, config, {
+                  chartData,
+                  tableRows,
+                  insight,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_fb_growth created (native)`);
+              }
+
+              // ── ic_comp_overview: native 3-table layout ───────────────
+              else if (slide.type === 'ic_comp_overview') {
+                const dataEl = exportDiv.querySelector(
+                  '[data-comp-overview]',
+                ) as HTMLElement | null;
+                let igTable: any[] = [];
+                let ttTable: any[] = [];
+                let twTable: any[] = [];
+                let insight = '';
+                if (dataEl) {
+                  try {
+                    const parsed = JSON.parse(dataEl.getAttribute('data-comp-overview') || '{}');
+                    igTable = parsed.igTable || [];
+                    ttTable = parsed.ttTable || [];
+                    twTable = parsed.twTable || [];
+                    insight = parsed.insight || '';
+                  } catch {}
+                }
+                const { createIcCompOverviewNative } = await import('./pptxExporter');
+                createIcCompOverviewNative(pptx, config, {
+                  igTable,
+                  ttTable,
+                  twTable,
+                  insight,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_comp_overview created (native)`);
+              }
+
+              // ── ic_comp_detail: native post-card + narrative layout ───
+              else if (slide.type === 'ic_comp_detail') {
+                const dataEl = exportDiv.querySelector('[data-comp-detail]') as HTMLElement | null;
+                let competitor = slide.content?.competitor ?? '';
+                let igPosts: any[] = [];
+                let ttPosts: any[] = [];
+                let twPosts: any[] = [];
+                let narrative = '';
+                if (dataEl) {
+                  try {
+                    const parsed = JSON.parse(dataEl.getAttribute('data-comp-detail') || '{}');
+                    competitor = parsed.competitor || competitor;
+                    igPosts = parsed.igPosts || [];
+                    ttPosts = parsed.ttPosts || [];
+                    twPosts = parsed.twPosts || [];
+                    narrative = parsed.narrative || '';
+                  } catch {}
+                }
+                // Fallback: fetch from API if slide was never opened
+                if (!dataEl || (igPosts.length === 0 && ttPosts.length === 0 && twPosts.length === 0)) {
+                  try {
+                    const apiRes = await fetch(
+                      `/api/innercircle/competitor-detail?brand=${encodeURIComponent(config.clientName || '')}&period=${encodeURIComponent(config.period || '')}&competitor=${encodeURIComponent(competitor)}`,
+                    );
+                    const apiData = await apiRes.json();
+                    igPosts = apiData.igPosts || igPosts;
+                    ttPosts = apiData.ttPosts || ttPosts;
+                    twPosts = apiData.twPosts || twPosts;
+                  } catch {}
+                }
+                // Normalize IG posts: permalink → url for resolvePostImages
+                const igForResolve = igPosts.map((p: any) => ({ ...p, url: p.permalink || p.url }));
+                const [igResolved, ttResolved, twResolved] = await Promise.all([
+                  resolvePostImages(igForResolve, 'instagram'),
+                  resolvePostImages(ttPosts, 'tiktok'),
+                  resolvePostImages(twPosts, 'twitter'),
+                ]);
+                igPosts = igResolved.map((p: any) => ({ ...p, permalink: p.permalink || p.url }));
+                ttPosts = ttResolved;
+                twPosts = twResolved;
+                const { createIcCompDetailNative } = await import('./pptxExporter');
+                createIcCompDetailNative(pptx, config, {
+                  competitor,
+                  igPosts,
+                  ttPosts,
+                  twPosts,
+                  narrative,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_comp_detail created (native)`);
+              }
+
+              // ── ic_comp_ig_focus: native IG-focus layout ──────────────
+              else if (slide.type === 'ic_comp_ig_focus') {
+                const dataEl = exportDiv.querySelector(
+                  '[data-comp-ig-focus]',
+                ) as HTMLElement | null;
+                let competitor = slide.content?.competitor ?? '';
+                let top3: any[] = [];
+                let growthSeries: any[] = [];
+                let mainBrandRow: any = null;
+                let compRow: any = null;
+                let narrative = '';
+                if (dataEl) {
+                  try {
+                    const parsed = JSON.parse(dataEl.getAttribute('data-comp-ig-focus') || '{}');
+                    competitor = parsed.competitor || competitor;
+                    top3 = parsed.top3 || [];
+                    growthSeries = parsed.growthSeries || [];
+                    mainBrandRow = parsed.mainBrandRow || null;
+                    compRow = parsed.compRow || null;
+                    narrative = parsed.narrative || '';
+                  } catch {}
+                }
+                // Fallback: fetch from API if slide was never opened
+                if (!dataEl || top3.length === 0) {
+                  try {
+                    const apiRes = await fetch(
+                      `/api/innercircle/competitor-ig-focus?brand=${encodeURIComponent(config.clientName || '')}&period=${encodeURIComponent(config.period || '')}&competitor=${encodeURIComponent(competitor)}`,
+                    );
+                    const apiData = await apiRes.json();
+                    top3 = apiData.top3 || top3;
+                    growthSeries = apiData.growthSeries || growthSeries;
+                    mainBrandRow = apiData.mainBrandRow ?? mainBrandRow;
+                    compRow = apiData.compRow ?? compRow;
+                  } catch {}
+                }
+                // Resolve IG thumbnails (top3 uses permalink field)
+                const top3ForResolve = top3.map((p: any) => ({ ...p, url: p.permalink || p.url }));
+                const top3Resolved = await resolvePostImages(top3ForResolve, 'instagram');
+                top3 = top3Resolved.map((p: any) => ({ ...p, permalink: p.permalink || p.url }));
+                const { createIcCompIgFocusNative } = await import('./pptxExporter');
+                createIcCompIgFocusNative(pptx, config, {
+                  competitor,
+                  top3,
+                  growthSeries,
+                  mainBrandRow,
+                  compRow,
+                  narrative,
+                  currentPage: i + 1,
+                  totalPages: slides.length,
+                });
+                console.log(`✅ ic_comp_ig_focus created (native)`);
+              } else {
+                // Fallback for any other ic_* type
+                const imgData = await toPng(exportDiv, {
+                  cacheBust: true,
+                  width: 1920,
+                  height: 1080,
+                  pixelRatio: 2,
+                });
+                const pptxSlide = pptx.addSlide();
+                pptxSlide.addImage({ data: imgData, x: 0, y: 0, w: '100%', h: '100%' });
+                console.log(`✅ InnerCircle slide (screenshot fallback): ${slide.title}`);
+              }
+            } catch (error) {
+              console.error(`InnerCircle slide export failed for "${slide.title}":`, error);
+              const pptxSlide = pptx.addSlide();
+              pptxSlide.addText(`Error capturing: ${slide.title}`, {
+                x: 1,
+                y: 2.5,
+                w: 8,
+                h: 0.5,
+                fontSize: 24,
+                color: 'FF0000',
+                align: 'center',
+              });
+            }
+          } else {
+            console.error(`Export div not found for InnerCircle slide: ${slide.title}`);
           }
           continue;
         }

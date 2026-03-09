@@ -1,4 +1,4 @@
-﻿import PptxGenJS from 'pptxgenjs';
+import PptxGenJS from 'pptxgenjs';
 import { ReportConfig, Slide } from '@/app/types';
 import { hexLuminance } from '@/app/utils/colorExtractor';
 
@@ -227,12 +227,14 @@ function drawSlideHeader(
   tv: SlideThemeVars,
   title: string,
   channel?: string,
-  opts?: { headerH?: number; headerY?: number },
+  opts?: { headerH?: number; headerY?: number; subtitle?: string; logoData?: string },
 ) {
   const headerX = 0.3;
   const headerY = opts?.headerY ?? 0.3;
   const headerW = 9.4;
-  const headerH = opts?.headerH ?? 0.55;
+  const hasSubtitle = !!opts?.subtitle;
+  const headerH = opts?.headerH ?? (hasSubtitle ? 0.65 : 0.55);
+  const rightW = 0.52; // reserved width on right for badge/logo
 
   // Card background
   slide.addShape(pptx.ShapeType.roundRect, {
@@ -252,7 +254,7 @@ function drawSlideHeader(
     },
   });
 
-  // Left accent bar (gradient approximated as primary color)
+  // Left accent bar
   slide.addShape(pptx.ShapeType.rect, {
     x: headerX,
     y: headerY,
@@ -272,28 +274,70 @@ function drawSlideHeader(
     line: { type: 'none' },
   });
 
-  // Title text
-  slide.addText(title, {
-    x: headerX + 0.2,
-    y: headerY + 0.03,
-    w: headerW - 1.2,
-    h: headerH - 0.06,
-    fontSize: 18,
-    bold: true,
-    color: tv.textColor,
-    align: 'left',
-    valign: 'middle',
-    fontFace: tv.font,
-  });
+  if (hasSubtitle) {
+    // Two-line header: title on top half, subtitle on bottom half
+    const titleH = headerH * 0.55;
+    const subY = headerY + titleH;
+    const subH = headerH - titleH;
+    slide.addText(title, {
+      x: headerX + 0.2,
+      y: headerY + 0.03,
+      w: headerW - rightW - 0.3,
+      h: titleH - 0.03,
+      fontSize: 14,
+      bold: true,
+      color: tv.textColor,
+      align: 'left',
+      valign: 'bottom',
+      fontFace: tv.font,
+      wrap: false,
+    });
+    slide.addText(opts!.subtitle!, {
+      x: headerX + 0.2,
+      y: subY,
+      w: headerW - rightW - 0.3,
+      h: subH - 0.04,
+      fontSize: 7,
+      bold: false,
+      color: tv.mutedColor,
+      align: 'left',
+      valign: 'top',
+      fontFace: tv.font,
+      wrap: false,
+    });
+  } else {
+    // Single-line header (original)
+    slide.addText(title, {
+      x: headerX + 0.2,
+      y: headerY + 0.03,
+      w: headerW - rightW - 0.3,
+      h: headerH - 0.06,
+      fontSize: 18,
+      bold: true,
+      color: tv.textColor,
+      align: 'left',
+      valign: 'middle',
+      fontFace: tv.font,
+    });
+  }
 
-  // Channel badge
-  if (channel) {
+  // Right side: logo image OR channel badge SVG
+  if (opts?.logoData) {
+    slide.addImage({
+      data: opts.logoData,
+      x: headerX + headerW - rightW,
+      y: headerY + (headerH - 0.4) / 2,
+      w: 0.42,
+      h: 0.4,
+      sizing: { type: 'contain', w: 0.42, h: 0.4 },
+    });
+  } else if (channel) {
     const badgeSvg = getChannelBadgeSvg(channel);
     if (badgeSvg) {
       slide.addImage({
         data: badgeSvg,
-        x: headerX + headerW - 0.5,
-        y: headerY + 0.06,
+        x: headerX + headerW - rightW,
+        y: headerY + (headerH - 0.42) / 2,
         w: 0.42,
         h: 0.42,
       });
@@ -1009,6 +1053,29 @@ export function createCoverSlide(pptx: PptxGenJS, config: ReportConfig) {
     align: 'center',
     fontFace: font,
   });
+}
+
+// ─── Thank You Slide (same design as cover, "Thank You" as title) ──────────
+
+/**
+ * Create a Thank You closing slide using the same cover template background
+ * screenshot + native editable text. Delegates to createCoverSlideHybrid with
+ * overridden title/subtitle so every template's styling is reused automatically.
+ */
+export async function createThankYouSlideHybrid(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  bgImageData: string,
+) {
+  await createCoverSlideHybrid(
+    pptx,
+    {
+      ...config,
+      reportTitle: 'Thank You',
+      reportDetails: config.clientName || config.preparedBy || '',
+    },
+    bgImageData,
+  );
 }
 
 // ─── Hybrid Section Heading Slide (screenshot bg + native text) ──
@@ -4211,6 +4278,1892 @@ export function createLayoutCustom(pptx: PptxGenJS, config: ReportConfig, title:
   });
 }
 
+// ─── InnerCircle Native / Hybrid Export Functions ────────────────────────────
+// Matches design of AllChannelOverviewSlide, AllChannelSentimentSlide,
+// ChannelSentimentSlide — same layout helpers as other native slides.
+
+const IC_POSITIVE = '27AE60';
+const IC_NEUTRAL = '95A5A6';
+const IC_NEGATIVE = 'E74C3C';
+
+// ── ic_all_overview ──────────────────────────────────────────────────────────
+interface IcTableMetricCell {
+  base: string;
+  pct: string;
+  positive: boolean | null; // true = green, false = red, null = muted
+}
+type IcTableCell = string | IcTableMetricCell;
+
+interface IcAllOverviewExportData {
+  tableHeaders: string[];
+  tableRows: IcTableCell[][];
+  insightText: string;
+  currentPage: number;
+  totalPages: number;
+}
+
+export function createIcAllOverviewNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcAllOverviewExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(slide, pptx, tv, `${config.clientName} — All Channel Overview`, undefined, {
+    subtitle: `${config.period} Report`,
+    logoData: config.coverDesign?.logoData,
+  });
+
+  const { font, isDark, textColor, mutedColor, cardBg, borderColor, primaryColor } = tv;
+
+  // ── Performance Table card ──────────────────────────────────────────────
+  const tblX = 0.3;
+  const tblY = 0.97;
+  const tblW = 9.4;
+  const tblH = 2.35;
+
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: tblX,
+    y: tblY,
+    w: tblW,
+    h: tblH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  // Top accent strip
+  slide.addShape(pptx.ShapeType.rect, {
+    x: tblX,
+    y: tblY,
+    w: tblW,
+    h: 0.03,
+    fill: { color: primaryColor },
+    line: { type: 'none' },
+  });
+
+  if (data.tableRows.length > 0) {
+    const colCount = data.tableHeaders.length || 7;
+    const chW = 1.4;
+    const otherW = (tblW - chW - 0.1) / (colCount - 1);
+    const colWidths = [chW, ...Array(colCount - 1).fill(otherW)];
+    const rowH = (tblH - 0.12) / (data.tableRows.length + 1);
+
+    const headerRow = data.tableHeaders.map((h, ci) => ({
+      text: h,
+      options: {
+        bold: true,
+        fontSize: 8,
+        color: mutedColor,
+        fontFace: font,
+        align: (ci === 0 ? 'left' : 'center') as 'left' | 'center',
+        fill: { color: isDark ? '1E293B' : 'F1F5F9' },
+      },
+    }));
+
+    const dataRows = data.tableRows.map((row, ri) =>
+      row.map((cell, ci) => {
+        const rowFill = { color: ri % 2 === 0 ? cardBg : isDark ? '1A2535' : 'F8FAFC' };
+        const baseAlign = (ci === 0 ? 'left' : 'center') as 'left' | 'center';
+        if (typeof cell === 'object' && 'base' in cell) {
+          // Metric cell: base value on line 1, colored +/- percentage on line 2
+          const pctColor =
+            cell.positive === true ? '15803D' : cell.positive === false ? 'B91C1C' : '94A3B8';
+          type TP = { text: string; options: Record<string, unknown> };
+          const richText: TP[] = [
+            {
+              text: cell.base,
+              options: { fontSize: 9, bold: true, color: textColor, breakLine: true },
+            },
+          ];
+          if (cell.pct) {
+            richText.push({
+              text: cell.pct,
+              options: { fontSize: 7, bold: true, color: pctColor },
+            });
+          }
+          return {
+            text: richText,
+            options: {
+              fontFace: font,
+              align: 'center' as const,
+              valign: 'middle' as const,
+              fill: rowFill,
+            },
+          };
+        }
+        return {
+          text: cell as string,
+          options: {
+            fontSize: 9,
+            color: textColor,
+            fontFace: font,
+            align: baseAlign,
+            valign: 'middle' as const,
+            fill: rowFill,
+          },
+        };
+      }),
+    );
+
+    slide.addTable([headerRow, ...dataRows], {
+      x: tblX + 0.05,
+      y: tblY + 0.06,
+      w: tblW - 0.1,
+      h: tblH - 0.08,
+      colW: colWidths,
+      rowH,
+      border: { type: 'solid', color: borderColor, pt: 0.4 },
+      fontFace: font,
+    });
+  }
+
+  // ── Analysis / Insight card ──────────────────────────────────────────────
+  const insY = tblY + tblH + 0.12;
+  const insH = 5.1 - insY - 0.05;
+  drawSlideInsight(slide, pptx, tv, {
+    x: tblX,
+    y: insY,
+    w: tblW,
+    h: insH,
+    label: 'Analysis',
+    text: data.insightText,
+  });
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ── ic_all_sentiment ─────────────────────────────────────────────────────────
+interface IcAllSentimentExportData {
+  chartData: ReturnType<typeof extractChartInfo>;
+  wcImage: string; // base64 PNG of the combined wordcloud panel
+  totals: { positive_pct: number; neutral_pct: number; negative_pct: number } | null;
+  currentPage: number;
+  totalPages: number;
+}
+
+export function createIcAllSentimentHybrid(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcAllSentimentExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(slide, pptx, tv, `${config.clientName} — All Channel Sentiment`, undefined, {
+    subtitle: `${config.period} Report`,
+    logoData: config.coverDesign?.logoData,
+  });
+
+  const { font, isDark, mutedColor, cardBg, borderColor, primaryColor } = tv;
+
+  // ── Line Chart card (full width) ────────────────────────────────────────
+  const chartX = 0.3;
+  const chartY = 0.97;
+  const chartW = 9.4;
+  const chartH = 2.3;
+
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: chartX,
+    y: chartY,
+    w: chartW,
+    h: chartH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: chartX,
+    y: chartY,
+    w: chartW,
+    h: 0.03,
+    fill: { color: primaryColor },
+    line: { type: 'none' },
+  });
+  slide.addText('Daily Mentions by Sentiment (All Channels)', {
+    x: chartX + 0.15,
+    y: chartY + 0.06,
+    w: chartW - 0.3,
+    h: 0.22,
+    fontSize: 9,
+    bold: true,
+    color: isDark ? 'CBD5E1' : '334155',
+    align: 'center',
+    fontFace: font,
+  });
+
+  const cd = data.chartData;
+  if (cd && cd.series.length > 0) {
+    slide.addChart(
+      pptx.ChartType.line,
+      cd.series.map((s) => ({
+        name: s.name,
+        labels: cd.labels,
+        values: s.values,
+      })),
+      {
+        x: chartX + 0.1,
+        y: chartY + 0.3,
+        w: chartW - 0.2,
+        h: chartH - 0.38,
+        chartColors: [IC_POSITIVE, IC_NEUTRAL, IC_NEGATIVE],
+        showLegend: true,
+        legendPos: 't',
+        legendFontSize: 8,
+        showTitle: false,
+        lineSmooth: false,
+        lineSize: 2,
+        lineDataSymbolSize: cd.labels.length > 15 ? 4 : 6,
+        valGridLine: { style: 'dash', color: isDark ? '334155' : 'E2E8F0' },
+        catGridLine: { style: 'none' },
+        catAxisLabelFontSize: 7,
+        valAxisLabelFontSize: 7,
+        catAxisLabelColor: mutedColor,
+        valAxisLabelColor: mutedColor,
+        catAxisLineShow: false,
+        valAxisLineShow: false,
+      },
+    );
+  }
+
+  // ── Bottom row ───────────────────────────────────────────────────────────
+  const botY = chartY + chartH + 0.12;
+  const botH = 5.1 - botY - 0.05;
+
+  // Wordcloud screenshot
+  const wcW = 4.1;
+  if (data.wcImage) {
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: chartX,
+      y: botY,
+      w: wcW,
+      h: botH,
+      fill: { color: 'FFFFFF' },
+      line: { color: borderColor, width: 0.75 },
+      rectRadius: 0.08,
+    });
+    slide.addText('Wordcloud Keywords All Sentiment', {
+      x: chartX + 0.1,
+      y: botY + 0.06,
+      w: wcW - 0.2,
+      h: 0.2,
+      fontSize: 8,
+      bold: true,
+      color: '475569',
+      align: 'center',
+      fontFace: font,
+    });
+    slide.addImage({
+      data: data.wcImage,
+      x: chartX + 0.08,
+      y: botY + 0.3,
+      w: wcW - 0.16,
+      h: botH - 0.36,
+      sizing: { type: 'contain', w: wcW - 0.16, h: botH - 0.36 },
+    });
+  }
+
+  // 3 Sentiment % boxes
+  if (data.totals) {
+    const sentiments = [
+      {
+        label: 'POSITIVE',
+        pct: data.totals.positive_pct,
+        color: IC_POSITIVE,
+        desc: 'Strong interest & appreciation',
+      },
+      {
+        label: 'NEUTRAL',
+        pct: data.totals.neutral_pct,
+        color: IC_NEUTRAL,
+        desc: 'Questions or general discussion',
+      },
+      {
+        label: 'NEGATIVE',
+        pct: data.totals.negative_pct,
+        color: IC_NEGATIVE,
+        desc: 'Concerns or dissatisfaction',
+      },
+    ];
+    const boxGap = 0.1;
+    const totalBoxW = 9.7 - (chartX + wcW + 0.1);
+    const boxW = (totalBoxW - boxGap * 2) / 3;
+    let boxX = chartX + wcW + 0.1;
+
+    sentiments.forEach(({ label, pct, color, desc }) => {
+      // Header bar
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: boxX,
+        y: botY,
+        w: boxW,
+        h: 0.3,
+        fill: { color },
+        line: { type: 'none' },
+        rectRadius: 0.06,
+      });
+      slide.addText(label, {
+        x: boxX,
+        y: botY + 0.03,
+        w: boxW,
+        h: 0.24,
+        fontSize: 8,
+        bold: true,
+        color: 'FFFFFF',
+        align: 'center',
+        fontFace: font,
+      });
+      // Body
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: boxX,
+        y: botY + 0.28,
+        w: boxW,
+        h: botH - 0.28,
+        fill: { color },
+        line: { type: 'none' },
+        rectRadius: 0.06,
+      });
+      slide.addText(`${pct.toFixed(1)}%`, {
+        x: boxX,
+        y: botY + 0.35,
+        w: boxW,
+        h: botH * 0.45,
+        fontSize: 24,
+        bold: true,
+        color: 'FFFFFF',
+        align: 'center',
+        valign: 'middle',
+        fontFace: font,
+      });
+      slide.addText(desc, {
+        x: boxX + 0.06,
+        y: botY + botH * 0.68,
+        w: boxW - 0.12,
+        h: botH * 0.28,
+        fontSize: 7,
+        color: 'FFFFFFCC',
+        align: 'center',
+        valign: 'top',
+        fontFace: font,
+        wrap: true,
+      });
+      boxX += boxW + boxGap;
+    });
+  }
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ── ic_ig/tt/fb_sentiment ────────────────────────────────────────────────────
+interface IcChannelSentimentExportData {
+  platform: string; // 'Instagram' | 'TikTok' | 'Facebook'
+  platformColor: string; // e.g. 'E1306C'
+  chartData: ReturnType<typeof extractChartInfo>;
+  wcNeutral: string; // base64 PNG
+  wcPositive: string;
+  wcNegative: string;
+  currentPage: number;
+  totalPages: number;
+}
+
+export function createIcChannelSentimentHybrid(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcChannelSentimentExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(
+    slide,
+    pptx,
+    tv,
+    `${config.clientName} — ${data.platform} Sentiment`,
+    data.platform.toLowerCase(),
+    {
+      subtitle: `${config.period} Report`,
+    },
+  );
+
+  const { font, isDark, mutedColor, cardBg, borderColor, primaryColor } = tv;
+
+  // Platform badge (colored pill — kept for visual accent below header)
+  // ── Line Chart card ──────────────────────────────────────────────────────
+  const chartX = 0.3;
+  const chartY = 0.97;
+  const chartW = 9.4;
+  const chartH = 2.3;
+
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: chartX,
+    y: chartY,
+    w: chartW,
+    h: chartH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: chartX,
+    y: chartY,
+    w: chartW,
+    h: 0.03,
+    fill: { color: primaryColor },
+    line: { type: 'none' },
+  });
+  slide.addText(`Daily Sentiment Trend — ${data.platform}`, {
+    x: chartX + 0.15,
+    y: chartY + 0.06,
+    w: chartW - 0.3,
+    h: 0.22,
+    fontSize: 9,
+    bold: true,
+    color: isDark ? 'CBD5E1' : '334155',
+    align: 'center',
+    fontFace: font,
+  });
+
+  const cd = data.chartData;
+  if (cd && cd.series.length > 0) {
+    slide.addChart(
+      pptx.ChartType.line,
+      cd.series.map((s) => ({
+        name: s.name,
+        labels: cd.labels,
+        values: s.values,
+      })),
+      {
+        x: chartX + 0.1,
+        y: chartY + 0.3,
+        w: chartW - 0.2,
+        h: chartH - 0.38,
+        chartColors: [IC_POSITIVE, IC_NEUTRAL, IC_NEGATIVE],
+        showLegend: true,
+        legendPos: 't',
+        legendFontSize: 8,
+        showTitle: false,
+        lineSmooth: false,
+        lineSize: 2,
+        lineDataSymbolSize: cd.labels.length > 15 ? 4 : 6,
+        valGridLine: { style: 'dash', color: isDark ? '334155' : 'E2E8F0' },
+        catGridLine: { style: 'none' },
+        catAxisLabelFontSize: 7,
+        valAxisLabelFontSize: 7,
+        catAxisLabelColor: mutedColor,
+        valAxisLabelColor: mutedColor,
+        catAxisLineShow: false,
+        valAxisLineShow: false,
+      },
+    );
+  }
+
+  // ── Bottom row: 3 equal wordcloud panels ────────────────────────────────
+  const botY = chartY + chartH + 0.12;
+  const botH = 5.1 - botY - 0.05;
+  const panelGap = 0.12;
+  const panelW = (9.4 - panelGap * 2) / 3;
+
+  const wcPanels = [
+    { img: data.wcNeutral, color: '7F8C8D', label: `Neutral WordCloud — ${data.platform}` },
+    { img: data.wcPositive, color: IC_POSITIVE, label: `Positive WordCloud — ${data.platform}` },
+    { img: data.wcNegative, color: 'C0392B', label: `Negative WordCloud — ${data.platform}` },
+  ];
+
+  wcPanels.forEach(({ img, color, label }, idx) => {
+    const panelX = 0.3 + idx * (panelW + panelGap);
+
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: panelX,
+      y: botY,
+      w: panelW,
+      h: botH,
+      fill: { color: 'FFFFFF' },
+      line: { color: borderColor, width: 0.75 },
+      rectRadius: 0.08,
+    });
+    // Title in sentiment color
+    slide.addText(label.toUpperCase(), {
+      x: panelX + 0.08,
+      y: botY + 0.06,
+      w: panelW - 0.16,
+      h: 0.2,
+      fontSize: 7,
+      bold: true,
+      color,
+      align: 'center',
+      fontFace: font,
+    });
+    if (img) {
+      slide.addImage({
+        data: img,
+        x: panelX + 0.06,
+        y: botY + 0.3,
+        w: panelW - 0.12,
+        h: botH - 0.36,
+        sizing: { type: 'contain', w: panelW - 0.12, h: botH - 0.36 },
+      });
+    }
+  });
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ── ic_ig_growth ─────────────────────────────────────────────────────────────
+interface IcIgGrowthExportData {
+  chartData: ReturnType<typeof extractChartInfo>;
+  tableHeaders: string[];
+  tableRows: string[][];
+  insightText: string;
+  currentPage: number;
+  totalPages: number;
+}
+
+export function createIcIgGrowthNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcIgGrowthExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(slide, pptx, tv, `${config.clientName} — Instagram Growth`, 'instagram', {
+    subtitle: `${config.period} Report`,
+  });
+
+  const { font, isDark, textColor, mutedColor, cardBg, borderColor, primaryColor } = tv;
+
+  // ── Top row: Chart left (63%) + Analysis right (37%) ─────────────────────
+  const rowX = 0.3;
+  const rowY = 0.97;
+  const rowW = 9.4;
+  const rowH = 2.9; // taller chart area
+  const gap = 0.12;
+  const chartW = Math.round(rowW * 0.63 * 100) / 100;
+  const analysisX = rowX + chartW + gap;
+  const analysisW = rowW - chartW - gap;
+
+  // Chart card
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: rowX,
+    y: rowY,
+    w: chartW,
+    h: rowH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: rowX,
+    y: rowY,
+    w: chartW,
+    h: 0.03,
+    fill: { color: primaryColor },
+    line: { type: 'none' },
+  });
+
+  const cd = data.chartData;
+  if (cd && cd.series.length > 0) {
+    const symSize = cd.labels.length > 15 ? 3 : 5;
+    // 2 stacked charts — equal height split with small gap
+    const labelH = 0.13;
+    const subGap = 0.05;
+    const totalUsable = rowH - 0.1 - 2 * labelH - subGap;
+    const subH = totalUsable / 2;
+
+    const commonOpts = {
+      showLegend: false,
+      showTitle: false,
+      lineSmooth: false,
+      lineSize: 1.5,
+      lineDataSymbolSize: symSize,
+      valGridLine: { style: 'dash' as const, color: isDark ? '334155' : 'E2E8F0' },
+      catGridLine: { style: 'none' as const },
+      catAxisLabelFontSize: 6,
+      valAxisLabelFontSize: 6,
+      catAxisLabelColor: mutedColor,
+      valAxisLabelColor: mutedColor,
+      catAxisLineShow: false,
+      valAxisLineShow: false,
+      valAxisMinVal: 0,
+      valAxisNumFmt: '#,##0',
+    };
+
+    // ── Chart 1: Followers Growth (top) ──
+    const c1Y = rowY + 0.08;
+    slide.addText('Followers Growth', {
+      x: rowX + 0.1,
+      y: c1Y,
+      w: chartW - 0.2,
+      h: labelH,
+      fontSize: 6,
+      bold: true,
+      color: isDark ? 'CBD5E1' : '475569',
+      fontFace: font,
+    });
+    if (cd.series[0]) {
+      slide.addChart(
+        pptx.ChartType.line,
+        [{ name: cd.series[0].name, labels: cd.labels, values: cd.series[0].values }],
+        {
+          ...commonOpts,
+          chartColors: ['E67E22'],
+          x: rowX + 0.05,
+          y: c1Y + labelH,
+          w: chartW - 0.1,
+          h: subH,
+        },
+      );
+    }
+
+    // ── Chart 2: Profile Reach (bottom) ──
+    const c2Y = c1Y + labelH + subH + subGap;
+    slide.addText('Profile Reach', {
+      x: rowX + 0.1,
+      y: c2Y,
+      w: chartW - 0.2,
+      h: labelH,
+      fontSize: 6,
+      bold: true,
+      color: isDark ? 'CBD5E1' : '475569',
+      fontFace: font,
+    });
+    if (cd.series[1]) {
+      slide.addChart(
+        pptx.ChartType.line,
+        [{ name: cd.series[1].name, labels: cd.labels, values: cd.series[1].values }],
+        {
+          ...commonOpts,
+          chartColors: ['3B82F6'],
+          x: rowX + 0.05,
+          y: c2Y + labelH,
+          w: chartW - 0.1,
+          h: subH,
+        },
+      );
+    }
+  }
+
+  // Analysis card
+  drawSlideInsight(slide, pptx, tv, {
+    x: analysisX,
+    y: rowY,
+    w: analysisW,
+    h: rowH,
+    label: 'Analysis',
+    text: data.insightText,
+  });
+
+  // ── Full-width Table ──────────────────────────────────────────────────────
+  const tblY = rowY + rowH + 0.1;
+  const tblH = 5.1 - tblY - 0.05;
+
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: rowX,
+    y: tblY,
+    w: rowW,
+    h: tblH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: rowX,
+    y: tblY,
+    w: rowW,
+    h: 0.03,
+    fill: { color: primaryColor },
+    line: { type: 'none' },
+  });
+
+  if (data.tableRows.length > 0) {
+    const colCount = data.tableHeaders.length || 12;
+    const monthColW = 0.95;
+    const otherColW = (rowW - monthColW - 0.1) / (colCount - 1);
+    const colWidths = [monthColW, ...Array(colCount - 1).fill(otherColW)];
+    const rowH_tbl = (tblH - 0.1) / (data.tableRows.length + 1);
+
+    const headerRow = data.tableHeaders.map((h, ci) => ({
+      text: h,
+      options: {
+        bold: true,
+        fontSize: 6,
+        color: 'FFFFFF',
+        fontFace: font,
+        align: (ci === 0 ? 'left' : 'center') as 'left' | 'center',
+        fill: { color: primaryColor },
+      },
+    }));
+
+    const dataRows = data.tableRows.map((row, ri) => {
+      const isGap = row[0]?.toLowerCase().includes('gap');
+      return row.map((cell, ci) => {
+        let cellColor = textColor;
+        if (isGap && ci > 0) {
+          if (cell.startsWith('-')) cellColor = 'EF4444';
+          else if (cell === '0' || cell === '0.00%') cellColor = '94A3B8';
+          else cellColor = '10B981';
+        }
+        return {
+          text: cell,
+          options: {
+            fontSize: 7,
+            color: cellColor,
+            fontFace: font,
+            align: (ci === 0 ? 'left' : 'center') as 'left' | 'center',
+            bold: isGap || ci === 0,
+            fill: {
+              color: isGap
+                ? isDark
+                  ? '1A2535'
+                  : 'F1F5F9'
+                : ri % 2 === 0
+                  ? cardBg
+                  : isDark
+                    ? '1A2535'
+                    : 'F8FAFC',
+            },
+          },
+        };
+      });
+    });
+
+    slide.addTable([headerRow, ...dataRows], {
+      x: rowX + 0.05,
+      y: tblY + 0.06,
+      w: rowW - 0.1,
+      h: tblH - 0.09,
+      colW: colWidths,
+      rowH: rowH_tbl,
+      border: { type: 'solid', color: borderColor, pt: 0.4 },
+      fontFace: font,
+    });
+  }
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ── ic_ig_best_least ──────────────────────────────────────────────────────────
+interface IcPostCard {
+  follows: number | null;
+  reach: number | null;
+  engagement: number | null;
+  engagement_rate: number | null;
+  url: string | null;
+  image_url: string | null; // base64 data URI pre-fetched by exportHelpers
+}
+
+interface IcIgBestLeastExportData {
+  best: IcPostCard[];
+  least: IcPostCard[];
+  bestAnalysis: string;
+  leastAnalysis: string;
+  currentPage: number;
+  totalPages: number;
+}
+
+// ── TikTok export interfaces ───────────────────────────────────────────────
+
+interface IcTtGrowthExportData {
+  chartData: { date: string; net_growth: number; profile_views: number; video_views: number }[];
+  tableRows: {
+    month: string;
+    post_count: string;
+    profile_views: string;
+    followers_growth: string;
+    reach: string;
+    views: string;
+    engagement: string;
+    avg_watch_time: string;
+  }[];
+  insight: string;
+  currentPage: number;
+  totalPages: number;
+}
+
+interface IcTtPost {
+  views: number | null;
+  engagement: number | null;
+  vr_rate: number | null;
+  url: string | null;
+  image_url?: string | null;
+}
+
+interface IcTtBestLeastExportData {
+  highest: IcTtPost[];
+  lowest: IcTtPost[];
+  bestAllTime: IcTtPost | null;
+  insight: string;
+  mode: 'organic' | 'paid';
+  currentPage: number;
+  totalPages: number;
+}
+
+interface IcTtPillarPost {
+  post_date: string | null;
+  vr_rate: number | null;
+  views: number | null;
+  engagement: number | null;
+  avg_watch_time: number | null;
+  url: string | null;
+  image_url?: string | null;
+}
+
+interface IcTtContentPillarExportData {
+  pillars: { pillar: string; posts: IcTtPillarPost[]; insight: string }[];
+  currentPage: number;
+  totalPages: number;
+}
+
+function fmtNative(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '-';
+  const n = Number(v);
+  if (isNaN(n)) return '-';
+  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (Math.abs(n) >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return n.toLocaleString();
+}
+
+function fmtERNative(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '-';
+  const n = Number(v);
+  if (isNaN(n)) return '-';
+  const pct = Math.abs(n) <= 1 ? n * 100 : n;
+  return `${pct.toFixed(2)}%`;
+}
+
+export function createIcIgBestLeastNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcIgBestLeastExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(
+    slide,
+    pptx,
+    tv,
+    `${config.clientName} \u2014 Instagram Best & Least`,
+    'instagram',
+    { subtitle: `${config.period} Report \u00b7 Top 5 Posts by Engagement` },
+  );
+
+  const { font, isDark, textColor, mutedColor, cardBg, borderColor, primaryColor } = tv;
+
+  const BEST_COLOR = '16A34A';
+  const LEAST_COLOR = 'DC2626';
+
+  // Layout constants
+  const colW = 4.6;
+  const gapBetweenCols = 0.2;
+  const colX = [0.3, 0.3 + colW + gapBetweenCols] as const; // left, right
+  const colHeaderY = 0.97;
+  const colHeaderH = 0.3;
+  const cardsY = colHeaderY + colHeaderH + 0.08;
+  const cardsH = 2.3;
+  const analysisY = cardsY + cardsH + 0.08;
+  const analysisH = 5.08 - analysisY;
+
+  const cardCount = 5;
+  const cardGap = 0.04;
+  const cardW = (colW - (cardCount - 1) * cardGap) / cardCount;
+  const imgH = cardsH * 0.52;
+  const metricsH = cardsH - imgH;
+
+  const columns: Array<{ posts: IcPostCard[]; color: string; label: string; analysis: string }> = [
+    { posts: data.best, color: BEST_COLOR, label: 'Best 5', analysis: data.bestAnalysis },
+    { posts: data.least, color: LEAST_COLOR, label: 'Least 5', analysis: data.leastAnalysis },
+  ];
+
+  columns.forEach(({ posts, color, label, analysis }, ci) => {
+    const cx = colX[ci];
+
+    // ── Column header ─────────────────────────────────────────────────────
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: cx,
+      y: colHeaderY,
+      w: colW,
+      h: colHeaderH,
+      fill: { color: color, transparency: 90 },
+      line: { color: color, width: 0.75, transparency: 70 },
+      rectRadius: 0.06,
+    });
+    slide.addText(label.toUpperCase(), {
+      x: cx + 0.18,
+      y: colHeaderY,
+      w: colW - 0.36,
+      h: colHeaderH,
+      fontSize: 9,
+      bold: true,
+      color: color,
+      fontFace: font,
+      align: 'left',
+      valign: 'middle',
+    });
+
+    // ── Post cards ────────────────────────────────────────────────────────
+    posts.slice(0, cardCount).forEach((post, pi) => {
+      const cardX = cx + pi * (cardW + cardGap);
+
+      // Card background
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: cardX,
+        y: cardsY,
+        w: cardW,
+        h: cardsH,
+        fill: { color: cardBg },
+        line: { color: borderColor, width: 0.5 },
+        rectRadius: 0.06,
+        shadow: { type: 'outer', blur: 3, offset: 1, color: '000000', opacity: 0.05 },
+      });
+
+      // Image — use actual thumbnail if available, else colored placeholder
+      if (post.image_url) {
+        slide.addImage({
+          data: post.image_url,
+          x: cardX,
+          y: cardsY,
+          w: cardW,
+          h: imgH,
+          ...(post.url ? { hyperlink: { url: post.url } } : {}),
+        });
+      } else {
+        slide.addShape(pptx.ShapeType.rect, {
+          x: cardX,
+          y: cardsY,
+          w: cardW,
+          h: imgH,
+          fill: { color: isDark ? '1E293B' : 'E2E8F0' },
+          line: { type: 'none' },
+          ...(post.url ? { hyperlink: { url: post.url } } : {}),
+        });
+      }
+
+      // Rank badge — wider shape + wrap:false so "#1" never breaks to 2 lines
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: cardX + 0.04,
+        y: cardsY + 0.04,
+        w: 0.34,
+        h: 0.17,
+        fill: { color: color },
+        line: { type: 'none' },
+        rectRadius: 0.05,
+      });
+      slide.addText(`#${pi + 1}`, {
+        x: cardX + 0.04,
+        y: cardsY + 0.04,
+        w: 0.34,
+        h: 0.17,
+        fontSize: 6,
+        bold: true,
+        color: 'FFFFFF',
+        fontFace: font,
+        align: 'center',
+        valign: 'middle',
+        wrap: false,
+      });
+
+      // Metrics — short labels
+      const metrics = [
+        { label: 'Follow', value: fmtNative(post.follows) },
+        { label: 'Reach', value: fmtNative(post.reach) },
+        { label: 'Engage', value: fmtNative(post.engagement) },
+        { label: 'ER', value: fmtERNative(post.engagement_rate) },
+      ];
+      const rowH_m = metricsH / (metrics.length + 1);
+      metrics.forEach(({ label: ml, value }, mi) => {
+        const my = cardsY + imgH + mi * rowH_m + 0.02;
+        const isER = ml === 'ER';
+        slide.addText(ml, {
+          x: cardX + 0.02,
+          y: my,
+          w: cardW * 0.5,
+          h: rowH_m,
+          fontSize: 4.5,
+          color: mutedColor,
+          fontFace: font,
+          valign: 'middle',
+          wrap: false,
+        });
+        slide.addText(value, {
+          x: cardX + cardW * 0.5,
+          y: my,
+          w: cardW * 0.48,
+          h: rowH_m,
+          fontSize: 5,
+          bold: true,
+          color: isER ? color : textColor,
+          fontFace: font,
+          align: 'right',
+          valign: 'middle',
+          wrap: false,
+        });
+      });
+      // Link row
+      const linkY = cardsY + imgH + metrics.length * rowH_m + 0.02;
+      slide.addText('Link', {
+        x: cardX + 0.02,
+        y: linkY,
+        w: cardW * 0.4,
+        h: rowH_m,
+        fontSize: 4.5,
+        color: mutedColor,
+        fontFace: font,
+        valign: 'middle',
+        wrap: false,
+      });
+      if (post.url) {
+        slide.addText('View', {
+          x: cardX + cardW * 0.4,
+          y: linkY,
+          w: cardW * 0.58,
+          h: rowH_m,
+          fontSize: 5,
+          color: '3B82F6',
+          bold: true,
+          fontFace: font,
+          underline: { style: 'sng', color: '3B82F6' },
+          align: 'right',
+          valign: 'middle',
+          wrap: false,
+          hyperlink: { url: post.url, tooltip: post.url },
+        });
+      } else {
+        slide.addText('—', {
+          x: cardX + cardW * 0.4,
+          y: linkY,
+          w: cardW * 0.58,
+          h: rowH_m,
+          fontSize: 5,
+          color: mutedColor,
+          fontFace: font,
+          align: 'right',
+          valign: 'middle',
+          wrap: false,
+        });
+      }
+    });
+
+    // ── Analysis box ──────────────────────────────────────────────────────
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: cx,
+      y: analysisY,
+      w: colW,
+      h: analysisH,
+      fill: { color: color, transparency: 96 },
+      line: { color: color, width: 0.75, transparency: 70 },
+      rectRadius: 0.06,
+    });
+    // Title bar
+    slide.addShape(pptx.ShapeType.rect, {
+      x: cx,
+      y: analysisY,
+      w: colW,
+      h: 0.22,
+      fill: { color: color, transparency: 85 },
+      line: { type: 'none' },
+    });
+    slide.addText(`INSIGHTS \u2014 ${label.toUpperCase()}`, {
+      x: cx + 0.1,
+      y: analysisY,
+      w: colW - 0.2,
+      h: 0.22,
+      fontSize: 6,
+      bold: true,
+      color: color,
+      fontFace: font,
+      valign: 'middle',
+    });
+    // Analysis body text
+    slide.addText(analysis || 'No analysis provided.', {
+      x: cx + 0.1,
+      y: analysisY + 0.24,
+      w: colW - 0.2,
+      h: analysisH - 0.3,
+      fontSize: 7,
+      color: isDark ? 'CBD5E1' : '475569',
+      fontFace: font,
+      valign: 'top',
+      wrap: true,
+    });
+  });
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ── ic_ig_content_pillar ──────────────────────────────────────────────────────
+interface IcCpPostItem {
+  reach: number | null;
+  engagement: number | null;
+  engagement_rate: number | null;
+  saves: number | null;
+  shares: number | null;
+  comments: number | null;
+  format: string;
+  url: string | null;
+  image_url: string | null;
+}
+
+interface IcCpPillarData {
+  pillar: string;
+  lowest: IcCpPostItem[];
+  highest: IcCpPostItem[];
+  insight: string;
+}
+
+interface IcIgContentPillarExportData {
+  pillars: IcCpPillarData[];
+  currentPage: number;
+  totalPages: number;
+}
+
+export function createIcIgContentPillarNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcIgContentPillarExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(
+    slide,
+    pptx,
+    tv,
+    `${config.clientName} \u2014 Instagram Content Pillar`,
+    'instagram',
+    { subtitle: `${config.period} \u00b7 Lowest & Highest 6 Posts per Pillar` },
+  );
+
+  const { font, isDark, textColor, mutedColor, cardBg, borderColor, primaryColor } = tv;
+  const COLOR_LOW = 'DC2626';
+  const COLOR_HIGH = '16A34A';
+
+  // ── Layout constants ─────────────────────────────────────────────────────
+  const contentX = 0.3;
+  const contentW = 9.4;
+  const bodyY = 0.97;
+  const footerY = 5.15;
+  const bodyH = footerY - bodyY; // 4.18 inches
+  const pillarGap = 0.08;
+  const numPillars = Math.min(data.pillars.length, 2);
+  const pillarH =
+    numPillars > 1
+      ? (bodyH - pillarGap) / 2 // ~2.05
+      : bodyH;
+
+  const sidebarW = 0.22;
+  const insightW = 1.8;
+  const secGap = 0.06;
+  const lowHighW = (contentW - sidebarW - insightW - 3 * secGap) / 2; // ~3.6
+
+  const sidebarX = contentX;
+  const lowX = sidebarX + sidebarW + secGap;
+  const highX = lowX + lowHighW + secGap;
+  const insightX = highX + lowHighW + secGap;
+
+  const cardGap = 0.03;
+  const cardW = (lowHighW - 2 * cardGap) / 3; // ~1.18
+
+  const padV = 0.04;
+  const labelH = 0.15;
+  const cardsAreaH = pillarH - labelH - 2 * padV;
+  const cardRowGap = 0.04;
+  const cardH = (cardsAreaH - cardRowGap) / 2; // ~0.89
+
+  const imgW = cardW * 0.5;
+  const metricsW = cardW - imgW;
+  const numMetricRows = 8;
+  const mRowH = cardH / numMetricRows;
+
+  // ── Draw each pillar row ──────────────────────────────────────────────────
+  data.pillars.slice(0, 2).forEach((pData, pi) => {
+    const py = bodyY + pi * (pillarH + pillarGap);
+
+    // Outer pillar card
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: contentX,
+      y: py,
+      w: contentW,
+      h: pillarH,
+      fill: { color: cardBg },
+      line: { color: borderColor, width: 0.5 },
+      rectRadius: 0.06,
+      shadow: { type: 'outer', blur: 3, offset: 1, color: '000000', opacity: 0.04 },
+    });
+
+    // Sidebar — pillar name (rotated)
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: sidebarX + 0.02,
+      y: py + padV,
+      w: sidebarW - 0.04,
+      h: pillarH - 2 * padV,
+      fill: { color: primaryColor, transparency: 90 },
+      line: { color: primaryColor, width: 0.5, transparency: 75 },
+      rectRadius: 0.04,
+    });
+    slide.addText(pData.pillar.toUpperCase(), {
+      x: sidebarX + 0.02,
+      y: py + padV,
+      w: sidebarW - 0.04,
+      h: pillarH - 2 * padV,
+      fontSize: 5.5,
+      bold: true,
+      color: primaryColor,
+      fontFace: font,
+      align: 'center',
+      valign: 'middle',
+      rotate: 270,
+      wrap: false,
+    });
+
+    // ── Lowest + Highest sections ─────────────────────────────────────────
+    const sections = [
+      { posts: pData.lowest, color: COLOR_LOW, label: 'LOWEST', sx: lowX },
+      { posts: pData.highest, color: COLOR_HIGH, label: 'HIGHEST', sx: highX },
+    ];
+
+    sections.forEach(({ posts, color, label, sx }) => {
+      // Section label
+      slide.addText(label, {
+        x: sx,
+        y: py + padV,
+        w: lowHighW,
+        h: labelH,
+        fontSize: 5.5,
+        bold: true,
+        color: color,
+        fontFace: font,
+        align: 'left',
+        valign: 'middle',
+      });
+
+      // 2 rows × 3 cards
+      [0, 1].forEach((row) => {
+        const cy = py + padV + labelH + row * (cardH + cardRowGap);
+        const startIdx = row * 3;
+
+        [0, 1, 2].forEach((col) => {
+          const cx = sx + col * (cardW + cardGap);
+          const post = posts[startIdx + col] as IcCpPostItem | undefined;
+
+          // Card background
+          slide.addShape(pptx.ShapeType.roundRect, {
+            x: cx,
+            y: cy,
+            w: cardW,
+            h: cardH,
+            fill: { color: color, transparency: 95 },
+            line: { color: color, width: 0.5, transparency: 78 },
+            rectRadius: 0.04,
+          });
+
+          if (!post) return;
+
+          // Image (left half) — actual thumbnail or placeholder
+          if (post.image_url) {
+            slide.addImage({
+              data: post.image_url,
+              x: cx,
+              y: cy,
+              w: imgW,
+              h: cardH,
+              ...(post.url ? { hyperlink: { url: post.url } } : {}),
+            });
+          } else {
+            slide.addShape(pptx.ShapeType.rect, {
+              x: cx,
+              y: cy,
+              w: imgW,
+              h: cardH,
+              fill: { color: isDark ? '1E293B' : 'E2E8F0' },
+              line: { type: 'none' },
+              ...(post.url ? { hyperlink: { url: post.url } } : {}),
+            });
+          }
+
+          // Rank badge
+          const rankIdx = startIdx + col + 1;
+          slide.addShape(pptx.ShapeType.roundRect, {
+            x: cx + 0.02,
+            y: cy + 0.02,
+            w: 0.2,
+            h: 0.12,
+            fill: { color: color },
+            line: { type: 'none' },
+            rectRadius: 0.04,
+          });
+          slide.addText(`#${rankIdx}`, {
+            x: cx + 0.02,
+            y: cy + 0.02,
+            w: 0.2,
+            h: 0.12,
+            fontSize: 4.5,
+            bold: true,
+            color: 'FFFFFF',
+            fontFace: font,
+            align: 'center',
+            valign: 'middle',
+            wrap: false,
+          });
+
+          // Metrics (right half)
+          const mx = cx + imgW;
+          const metrics: { lbl: string; val: string; isER?: boolean; isLink?: boolean }[] = [
+            { lbl: 'Reach', val: fmtNative(post.reach) },
+            { lbl: 'Eng', val: fmtNative(post.engagement) },
+            { lbl: 'ER', val: fmtERNative(post.engagement_rate), isER: true },
+            { lbl: 'Saves', val: fmtNative(post.saves) },
+            { lbl: 'Shares', val: fmtNative(post.shares) },
+            { lbl: 'Cmts', val: fmtNative(post.comments) },
+            { lbl: 'Fmt', val: (post.format || '-').substring(0, 7) },
+            { lbl: 'Link', val: post.url ? 'View' : '\u2014', isLink: !!post.url },
+          ];
+
+          metrics.forEach(({ lbl, val, isER, isLink }, mi) => {
+            const my = cy + mi * mRowH;
+            slide.addText(lbl, {
+              x: mx + 0.01,
+              y: my,
+              w: metricsW * 0.44,
+              h: mRowH,
+              fontSize: 3.5,
+              color: mutedColor,
+              fontFace: font,
+              valign: 'middle',
+              wrap: false,
+            });
+            if (isLink && post.url) {
+              slide.addText('View', {
+                x: mx + metricsW * 0.44,
+                y: my,
+                w: metricsW * 0.54,
+                h: mRowH,
+                fontSize: 4,
+                bold: true,
+                color: '3B82F6',
+                fontFace: font,
+                align: 'right',
+                valign: 'middle',
+                wrap: false,
+                hyperlink: { url: post.url, tooltip: post.url },
+              });
+            } else {
+              slide.addText(val, {
+                x: mx + metricsW * 0.44,
+                y: my,
+                w: metricsW * 0.54,
+                h: mRowH,
+                fontSize: 4,
+                bold: true,
+                color: isER ? color : textColor,
+                fontFace: font,
+                align: 'right',
+                valign: 'middle',
+                wrap: false,
+              });
+            }
+          });
+        });
+      });
+    });
+
+    // ── Insight box ───────────────────────────────────────────────────────
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: insightX,
+      y: py,
+      w: insightW,
+      h: pillarH,
+      fill: { color: isDark ? '1E293B' : 'F8FAFC' },
+      line: { color: borderColor, width: 0.5 },
+      rectRadius: 0.06,
+    });
+    // Header bar
+    slide.addShape(pptx.ShapeType.rect, {
+      x: insightX,
+      y: py,
+      w: insightW,
+      h: 0.22,
+      fill: { color: primaryColor, transparency: 88 },
+      line: { type: 'none' },
+    });
+    slide.addText('ANALYSIS', {
+      x: insightX + 0.08,
+      y: py,
+      w: insightW - 0.16,
+      h: 0.22,
+      fontSize: 6,
+      bold: true,
+      color: primaryColor,
+      fontFace: font,
+      valign: 'middle',
+    });
+    // Body text
+    slide.addText(pData.insight || 'No analysis provided.', {
+      x: insightX + 0.08,
+      y: py + 0.24,
+      w: insightW - 0.16,
+      h: pillarH - 0.3,
+      fontSize: 6.5,
+      color: isDark ? 'CBD5E1' : '475569',
+      fontFace: font,
+      valign: 'top',
+      wrap: true,
+    });
+  });
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ── ic_ig_tagged_post ─────────────────────────────────────────────────────────
+interface IcTaggedPost {
+  post_date: string | null;
+  engagement: number | null;
+  url: string | null;
+  image_url: string | null;
+}
+
+interface IcTaggedSummary {
+  total_tagged_post: number | null;
+  total_tagged_post_inc: number | null;
+  total_user_count: number | null;
+  total_user_count_inc: number | null;
+}
+
+interface IcTaggedSentiments {
+  Negative: string[];
+  Positive: string[];
+  Neutral: string[];
+}
+
+interface IcIgTaggedPostExportData {
+  posts: IcTaggedPost[];
+  summary: IcTaggedSummary | null;
+  sentiments: IcTaggedSentiments;
+  currentPage: number;
+  totalPages: number;
+}
+
+export function createIcIgTaggedPostNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcIgTaggedPostExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(
+    slide,
+    pptx,
+    tv,
+    `${config.clientName} \u2014 Instagram Tagged Post`,
+    'instagram',
+    { subtitle: `${config.period} \u00b7 Top 3 Tagged Posts \u00b7 Sentiment Comments` },
+  );
+
+  const { font, isDark, textColor, mutedColor, cardBg, borderColor, primaryColor } = tv;
+
+  // ── Layout constants ──────────────────────────────────────────────────────
+  const contentX = 0.3;
+  const contentW = 9.4;
+  const bodyY = 0.97;
+  const footerY = 5.15;
+  const bodyH = footerY - bodyY; // 4.18"
+
+  const row1H = 2.1;
+  const rowGap = 0.08;
+  const row2Y = bodyY + row1H + rowGap;
+  const row2H = footerY - row2Y; // ~2.0"
+
+  // Post cards area (left 68% of content)
+  const postsW = 6.4;
+  const kpiGap = 0.15;
+  const kpiX = contentX + postsW + kpiGap;
+  const kpiW = contentW - postsW - kpiGap; // ~2.85"
+
+  const cardCount = 3;
+  const cardGap = 0.08;
+  const cardW = (postsW - (cardCount - 1) * cardGap) / cardCount; // ~2.08"
+  const cardH = row1H;
+  const infoH = 0.68;
+  const imgH = cardH - infoH;
+
+  // KPI cards
+  const kpiCardGap = 0.1;
+  const kpiCardH = (row1H - kpiCardGap) / 2; // ~1.0"
+
+  // Sentiment columns
+  const sentGap = 0.1;
+  const sentColW = (contentW - 2 * sentGap) / 3; // ~3.067"
+
+  const SENT_COLORS: Record<string, string> = {
+    Negative: 'DC2626',
+    Positive: '16A34A',
+    Neutral: '6366F1',
+  };
+
+  // ── Post cards ────────────────────────────────────────────────────────────
+  data.posts.slice(0, 3).forEach((post, pi) => {
+    const cx = contentX + pi * (cardW + cardGap);
+    const cy = bodyY;
+
+    // Card background
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: cx,
+      y: cy,
+      w: cardW,
+      h: cardH,
+      fill: { color: cardBg },
+      line: { color: borderColor, width: 0.5 },
+      rectRadius: 0.06,
+      shadow: { type: 'outer', blur: 3, offset: 1, color: '000000', opacity: 0.05 },
+    });
+
+    // Info box background
+    slide.addShape(pptx.ShapeType.rect, {
+      x: cx,
+      y: cy,
+      w: cardW,
+      h: infoH,
+      fill: { color: isDark ? '1E293B' : 'F8FAFC' },
+      line: { type: 'none' },
+    });
+
+    // Rank badge
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: cx + 0.08,
+      y: cy + 0.08,
+      w: 0.28,
+      h: 0.17,
+      fill: { color: primaryColor },
+      line: { type: 'none' },
+      rectRadius: 0.06,
+    });
+    slide.addText(`#${pi + 1}`, {
+      x: cx + 0.08,
+      y: cy + 0.08,
+      w: 0.28,
+      h: 0.17,
+      fontSize: 6.5,
+      bold: true,
+      color: 'FFFFFF',
+      fontFace: font,
+      align: 'center',
+      valign: 'middle',
+      wrap: false,
+    });
+
+    // Engagement value
+    slide.addText(fmtNative(post.engagement), {
+      x: cx + 0.42,
+      y: cy + 0.08,
+      w: cardW - 0.5,
+      h: 0.18,
+      fontSize: 10,
+      bold: true,
+      color: textColor,
+      fontFace: font,
+      align: 'left',
+      valign: 'middle',
+      wrap: false,
+    });
+    slide.addText('engagement', {
+      x: cx + 0.42,
+      y: cy + 0.26,
+      w: cardW - 0.5,
+      h: 0.13,
+      fontSize: 5.5,
+      color: mutedColor,
+      fontFace: font,
+      align: 'left',
+      valign: 'middle',
+      wrap: false,
+    });
+
+    // Date
+    const dateStr = post.post_date
+      ? (() => {
+          try {
+            return new Date(post.post_date).toLocaleDateString('en-GB', {
+              day: '2-digit',
+              month: 'short',
+              year: 'numeric',
+            });
+          } catch {
+            return post.post_date;
+          }
+        })()
+      : '-';
+    slide.addText(dateStr, {
+      x: cx + 0.08,
+      y: cy + 0.4,
+      w: cardW - 0.16,
+      h: 0.14,
+      fontSize: 6,
+      color: mutedColor,
+      fontFace: font,
+      align: 'left',
+      valign: 'middle',
+      wrap: false,
+    });
+
+    // Link
+    if (post.url) {
+      slide.addText('View Post', {
+        x: cx + 0.08,
+        y: cy + 0.53,
+        w: cardW - 0.16,
+        h: 0.13,
+        fontSize: 6,
+        bold: true,
+        color: '3B82F6',
+        fontFace: font,
+        align: 'left',
+        valign: 'middle',
+        wrap: false,
+        underline: { style: 'sng', color: '3B82F6' },
+        hyperlink: { url: post.url, tooltip: post.url },
+      });
+    } else {
+      slide.addText('No link', {
+        x: cx + 0.08,
+        y: cy + 0.53,
+        w: cardW - 0.16,
+        h: 0.13,
+        fontSize: 6,
+        color: mutedColor,
+        fontFace: font,
+        align: 'left',
+        valign: 'middle',
+        wrap: false,
+      });
+    }
+
+    // Image — actual thumbnail or placeholder
+    if (post.image_url) {
+      slide.addImage({
+        data: post.image_url,
+        x: cx,
+        y: cy + infoH,
+        w: cardW,
+        h: imgH,
+        ...(post.url ? { hyperlink: { url: post.url } } : {}),
+      });
+    } else {
+      slide.addShape(pptx.ShapeType.rect, {
+        x: cx,
+        y: cy + infoH,
+        w: cardW,
+        h: imgH,
+        fill: { color: isDark ? '1E293B' : 'E2E8F0' },
+        line: { type: 'none' },
+        ...(post.url ? { hyperlink: { url: post.url } } : {}),
+      });
+      slide.addText('Image', {
+        x: cx,
+        y: cy + infoH,
+        w: cardW,
+        h: imgH,
+        fontSize: 7,
+        color: isDark ? '334155' : 'CBD5E1',
+        fontFace: font,
+        align: 'center',
+        valign: 'middle',
+      });
+    }
+  });
+
+  // ── KPI Cards ─────────────────────────────────────────────────────────────
+  const kpiItems = [
+    {
+      label: 'TOTAL TAGGED POSTS',
+      value: data.summary?.total_tagged_post ?? null,
+      change: data.summary?.total_tagged_post_inc ?? null,
+    },
+    {
+      label: 'TAGGED USER COUNT',
+      value: data.summary?.total_user_count ?? null,
+      change: data.summary?.total_user_count_inc ?? null,
+    },
+  ];
+
+  kpiItems.forEach(({ label, value, change }, ki) => {
+    const ky = bodyY + ki * (kpiCardH + kpiCardGap);
+    const isPos = (change ?? 0) >= 0;
+    const pctStr = change !== null ? `${isPos ? '+' : ''}${Number(change).toFixed(1)}%` : '';
+
+    // Card background
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: kpiX,
+      y: ky,
+      w: kpiW,
+      h: kpiCardH,
+      fill: { color: cardBg },
+      line: { color: borderColor, width: 0.5 },
+      rectRadius: 0.06,
+      shadow: { type: 'outer', blur: 3, offset: 1, color: '000000', opacity: 0.05 },
+    });
+
+    // Left accent
+    slide.addShape(pptx.ShapeType.rect, {
+      x: kpiX,
+      y: ky,
+      w: 0.04,
+      h: kpiCardH,
+      fill: { color: primaryColor },
+      line: { type: 'none' },
+    });
+
+    // Label
+    slide.addText(label, {
+      x: kpiX + 0.14,
+      y: ky + 0.1,
+      w: kpiW - 0.22,
+      h: 0.2,
+      fontSize: 6.5,
+      bold: true,
+      color: mutedColor,
+      fontFace: font,
+      align: 'left',
+      valign: 'middle',
+      wrap: false,
+    });
+
+    // Value
+    slide.addText(fmtNative(value), {
+      x: kpiX + 0.14,
+      y: ky + 0.3,
+      w: kpiW - 0.22,
+      h: 0.42,
+      fontSize: 22,
+      bold: true,
+      color: textColor,
+      fontFace: font,
+      align: 'left',
+      valign: 'middle',
+      wrap: false,
+    });
+
+    // % change badge
+    if (pctStr) {
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: kpiX + 0.14,
+        y: ky + kpiCardH - 0.27,
+        w: 0.55,
+        h: 0.18,
+        fill: { color: isPos ? '16A34A' : 'DC2626', transparency: 88 },
+        line: { type: 'none' },
+        rectRadius: 0.04,
+      });
+      slide.addText(pctStr, {
+        x: kpiX + 0.14,
+        y: ky + kpiCardH - 0.27,
+        w: 0.55,
+        h: 0.18,
+        fontSize: 7,
+        bold: true,
+        color: isPos ? '16A34A' : 'DC2626',
+        fontFace: font,
+        align: 'center',
+        valign: 'middle',
+        wrap: false,
+      });
+    }
+  });
+
+  // ── Sentiment Columns ─────────────────────────────────────────────────────
+  const sentOrder = ['Negative', 'Positive', 'Neutral'] as const;
+
+  sentOrder.forEach((cat, ci) => {
+    const sx = contentX + ci * (sentColW + sentGap);
+    const sy = row2Y;
+    const color = SENT_COLORS[cat];
+    const comments: string[] = data.sentiments[cat] || [];
+
+    // Column card background
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: sx,
+      y: sy,
+      w: sentColW,
+      h: row2H,
+      fill: { color: color, transparency: 96 },
+      line: { color: color, width: 0.5, transparency: 70 },
+      rectRadius: 0.06,
+    });
+
+    // Header bar
+    slide.addShape(pptx.ShapeType.rect, {
+      x: sx,
+      y: sy,
+      w: sentColW,
+      h: 0.25,
+      fill: { color: color, transparency: 85 },
+      line: { type: 'none' },
+    });
+    slide.addText(`${cat.toUpperCase()}  (${comments.length})`, {
+      x: sx + 0.1,
+      y: sy,
+      w: sentColW - 0.2,
+      h: 0.25,
+      fontSize: 7,
+      bold: true,
+      color: color,
+      fontFace: font,
+      valign: 'middle',
+      wrap: false,
+    });
+
+    // Comment rows
+    const commentsAreaH = row2H - 0.3;
+    const rowH = commentsAreaH / 4;
+    comments.slice(0, 4).forEach((c, i) => {
+      const ry = sy + 0.3 + i * rowH;
+      const text = c.length > 85 ? c.substring(0, 85) + '\u2026' : c;
+      slide.addText(`\u2022  ${text}`, {
+        x: sx + 0.1,
+        y: ry,
+        w: sentColW - 0.2,
+        h: rowH,
+        fontSize: 6,
+        color: isDark ? 'CBD5E1' : '374151',
+        fontFace: font,
+        valign: 'top',
+        wrap: true,
+      });
+    });
+
+    if (comments.length === 0) {
+      slide.addText('No comments available', {
+        x: sx + 0.1,
+        y: sy + 0.3,
+        w: sentColW - 0.2,
+        h: 0.3,
+        fontSize: 7,
+        color: mutedColor,
+        fontFace: font,
+        valign: 'middle',
+        italic: true,
+      });
+    }
+  });
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
 export function exportToPPTX(slides: Slide[], config: ReportConfig) {
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_16x9';
@@ -4267,4 +6220,3513 @@ export function exportToPPTX(slides: Slide[], config: ReportConfig) {
   });
 
   return pptx;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TikTok: Growth (tiktok_page_17)
+// ─────────────────────────────────────────────────────────────────────────────
+export function createIcTtGrowthNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcTtGrowthExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(slide, pptx, tv, `${config.clientName} \u2014 TikTok Growth`, 'tiktok', {
+    subtitle: `${config.period} \u00b7 Profile Views \u00b7 Net Growth \u00b7 Video Views`,
+  });
+
+  const { font, isDark, textColor, mutedColor, cardBg, borderColor, primaryColor } = tv;
+
+  const contentX = 0.3;
+  const contentW = 9.4;
+  const bodyY = 0.97;
+  const footerY = 5.15;
+  const bodyH = footerY - bodyY; // 4.18"
+
+  const gap = 0.12;
+  const insightW = contentW * 0.28;
+  const chartW = contentW - insightW - gap;
+  const insightX = contentX + chartW + gap;
+
+  // Table taller (more room), charts shorter
+  const tableH = 1.3;
+  const tableGap = 0.08;
+  const chartsH = bodyH - tableH - tableGap; // ~2.80"
+
+  // ── Chart card ─────────────────────────────────────────────────────────────
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: contentX,
+    y: bodyY,
+    w: chartW,
+    h: chartsH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: contentX,
+    y: bodyY,
+    w: chartW,
+    h: 0.03,
+    fill: { color: primaryColor },
+    line: { type: 'none' },
+  });
+
+  if (data.chartData.length > 0) {
+    // Format tanggal: ambil "MMM-DD" dari ISO string misalnya "2025-01-15" → "Jan-15"
+    const monthNames = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    const labels = data.chartData.map((d) => {
+      const raw = d.date ?? '';
+      const parts = raw.split('-');
+      if (parts.length >= 3) {
+        const mo = parseInt(parts[1], 10);
+        const day = parts[2].slice(0, 2);
+        return `${monthNames[(mo - 1) % 12]}-${day}`;
+      }
+      return raw;
+    });
+
+    const pvSeries = data.chartData.map((d) => d.profile_views ?? 0);
+    const ngSeries = data.chartData.map((d) => d.net_growth ?? 0);
+    const vvSeries = data.chartData.map((d) => d.video_views ?? 0);
+    const symSize = labels.length > 15 ? 2 : 4;
+    // Reduce label frequency if too many dates
+    const labelFreq = labels.length > 20 ? Math.ceil(labels.length / 10) : 1;
+
+    // Common axis options — NO catAxisLabelFontFace / valAxisLabelFontFace
+    // to avoid PowerPoint glyph fallback bug ("g" appears instead of labels)
+    const axisOpts = {
+      showLegend: false,
+      showTitle: false,
+      lineSmooth: false,
+      lineSize: 1.5,
+      lineDataSymbolSize: symSize,
+      valGridLine: { style: 'dash' as const, color: isDark ? '334155' : 'E2E8F0' },
+      catGridLine: { style: 'none' as const },
+      catAxisLabelFontSize: 6,
+      valAxisLabelFontSize: 6,
+      catAxisLabelColor: mutedColor,
+      valAxisLabelColor: mutedColor,
+      catAxisLineShow: false,
+      valAxisLineShow: false,
+      catAxisLabelFrequency: String(labelFreq),
+    };
+
+    const labelH = 0.12;
+    const subGap = 0.04;
+    const totalUsable = chartsH - 0.08 - 3 * labelH - 2 * subGap;
+    const subH = totalUsable / 3;
+
+    // ── Chart 1: Profile Views ─────────────────────────────────────────────
+    const c1Y = bodyY + 0.06;
+    slide.addText('Profile Views', {
+      x: contentX + 0.1,
+      y: c1Y,
+      w: chartW - 0.2,
+      h: labelH,
+      fontSize: 5.5,
+      bold: true,
+      color: isDark ? 'CBD5E1' : '475569',
+      fontFace: font,
+    });
+    slide.addChart(pptx.ChartType.line, [{ name: 'Profile Views', labels, values: pvSeries }], {
+      ...axisOpts,
+      valAxisMinVal: 0,
+      chartColors: ['E67E22'],
+      x: contentX + 0.05,
+      y: c1Y + labelH,
+      w: chartW - 0.1,
+      h: subH,
+    });
+
+    // ── Chart 2: Net Growth ────────────────────────────────────────────────
+    const c2Y = c1Y + labelH + subH + subGap;
+    slide.addText('Net Growth', {
+      x: contentX + 0.1,
+      y: c2Y,
+      w: chartW - 0.2,
+      h: labelH,
+      fontSize: 5.5,
+      bold: true,
+      color: isDark ? 'CBD5E1' : '475569',
+      fontFace: font,
+    });
+    slide.addChart(pptx.ChartType.line, [{ name: 'Net Growth', labels, values: ngSeries }], {
+      ...axisOpts,
+      chartColors: ['3B82F6'],
+      x: contentX + 0.05,
+      y: c2Y + labelH,
+      w: chartW - 0.1,
+      h: subH,
+    });
+
+    // ── Chart 3: Video Views ───────────────────────────────────────────────
+    const c3Y = c2Y + labelH + subH + subGap;
+    slide.addText('Video Views', {
+      x: contentX + 0.1,
+      y: c3Y,
+      w: chartW - 0.2,
+      h: labelH,
+      fontSize: 5.5,
+      bold: true,
+      color: isDark ? 'CBD5E1' : '475569',
+      fontFace: font,
+    });
+    slide.addChart(pptx.ChartType.bar, [{ name: 'Video Views', labels, values: vvSeries }], {
+      ...axisOpts,
+      valAxisMinVal: 0,
+      chartColors: ['2980B9'],
+      barDir: 'col' as const,
+      x: contentX + 0.05,
+      y: c3Y + labelH,
+      w: chartW - 0.1,
+      h: subH,
+    });
+  }
+
+  // ── Insight box ────────────────────────────────────────────────────────────
+  drawSlideInsight(slide, pptx, tv, {
+    x: insightX,
+    y: bodyY,
+    w: insightW,
+    h: chartsH,
+    label: 'Analysis',
+    text: data.insight || '',
+  });
+
+  // ── Overview table — styled like IG Growth ─────────────────────────────────
+  const tableY = bodyY + chartsH + tableGap;
+  const headers = [
+    'Month',
+    'Post Count',
+    'Profile Views',
+    'Followers Growth',
+    'Reach',
+    'Views',
+    'Engagement',
+    'Avg Watch Time',
+  ];
+  const colCount = headers.length;
+  const monthColW = 0.85;
+  const otherColW = (contentW - monthColW - 0.1) / (colCount - 1);
+  const colWidths = [monthColW, ...Array(colCount - 1).fill(otherColW)];
+  const rowH_tbl = (tableH - 0.1) / (data.tableRows.length + 1);
+
+  if (data.tableRows.length > 0) {
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: contentX,
+      y: tableY,
+      w: contentW,
+      h: tableH,
+      fill: { color: cardBg },
+      line: { color: borderColor, width: 0.75 },
+      rectRadius: 0.08,
+      shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: contentX,
+      y: tableY,
+      w: contentW,
+      h: 0.03,
+      fill: { color: primaryColor },
+      line: { type: 'none' },
+    });
+
+    const headerRow = headers.map((h, ci) => ({
+      text: h,
+      options: {
+        bold: true,
+        fontSize: 6,
+        color: 'FFFFFF',
+        fontFace: font,
+        align: (ci === 0 ? 'left' : 'center') as 'left' | 'center',
+        fill: { color: primaryColor },
+      },
+    }));
+
+    const dataRows = data.tableRows.map((row, ri) => {
+      const vals = [
+        row.month,
+        row.post_count,
+        row.profile_views,
+        row.followers_growth,
+        row.reach,
+        row.views,
+        row.engagement,
+        row.avg_watch_time,
+      ];
+      const isGap = row.month?.toLowerCase().includes('gap');
+      return vals.map((cell, ci) => {
+        let cellColor = textColor;
+        if (isGap && ci > 0) {
+          if ((cell ?? '').startsWith('-')) cellColor = 'EF4444';
+          else if (cell === '0' || cell === '-') cellColor = '94A3B8';
+          else cellColor = '10B981';
+        }
+        return {
+          text: cell ?? '-',
+          options: {
+            fontSize: 6.5,
+            color: cellColor,
+            fontFace: font,
+            align: (ci === 0 ? 'left' : 'center') as 'left' | 'center',
+            bold: isGap || ci === 0,
+            fill: {
+              color: isGap
+                ? isDark
+                  ? '1A2535'
+                  : 'F1F5F9'
+                : ri % 2 === 0
+                  ? cardBg
+                  : isDark
+                    ? '1A2535'
+                    : 'F8FAFC',
+            },
+          },
+        };
+      });
+    });
+
+    slide.addTable([headerRow, ...dataRows], {
+      x: contentX + 0.05,
+      y: tableY + 0.06,
+      w: contentW - 0.1,
+      h: tableH - 0.09,
+      colW: colWidths,
+      rowH: rowH_tbl,
+      border: { type: 'solid', color: borderColor, pt: 0.4 },
+      fontFace: font,
+    });
+  }
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TikTok: Best & Least (tiktok_page_18 organic / tiktok_page_19 paid)
+// ─────────────────────────────────────────────────────────────────────────────
+export function createIcTtBestLeastNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcTtBestLeastExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  const modeLabel = data.mode === 'paid' ? 'Paid' : 'Organic';
+  drawSlideHeader(
+    slide,
+    pptx,
+    tv,
+    `${config.clientName} \u2014 TikTok ${modeLabel} Best & Least`,
+    'tiktok',
+    {
+      subtitle: `${config.period} \u00b7 Highest & Lowest 3`,
+    },
+  );
+
+  const { font, isDark, textColor, mutedColor, cardBg, borderColor, primaryColor } = tv;
+  const COLOR_HIGH = '16A34A';
+  const COLOR_LOW = 'DC2626';
+
+  const contentX = 0.3;
+  const contentW = 9.4;
+  const bodyY = 0.97;
+  const footerY = 5.15;
+  const bodyH = footerY - bodyY;
+
+  const gap = 0.1;
+  const rightW = contentW * 0.28;
+  const leftW = contentW - rightW - gap;
+  const rightX = contentX + leftW + gap;
+
+  const rowGap = 0.08;
+  const rowH = (bodyH - rowGap) / 2;
+
+  // ── Left column: Highest + Lowest ─────────────────────────────────────────
+  const drawPostRow = (posts: IcTtPost[], label: string, color: string, rowY: number) => {
+    // Section header
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: contentX,
+      y: rowY,
+      w: leftW,
+      h: 0.17,
+      fill: { color: color, transparency: 88 },
+      line: { color: color, width: 0.5, transparency: 70 },
+      rectRadius: 0.04,
+    });
+    slide.addText(label, {
+      x: contentX + 0.1,
+      y: rowY,
+      w: leftW - 0.2,
+      h: 0.17,
+      fontSize: 6.5,
+      bold: true,
+      color: color,
+      fontFace: font,
+      align: 'left',
+      valign: 'middle',
+    });
+
+    const cardsY = rowY + 0.2;
+    const cardsH = rowH - 0.2;
+    if (posts.length === 0) return;
+    // Always size cards as if there are 3 slots so width is consistent
+    const SLOTS = 3;
+    const cardGap = 0.06;
+    const cardW = (leftW - (SLOTS - 1) * cardGap) / SLOTS;
+    // Horizontal split: image LEFT 55%, metrics RIGHT 45%
+    const imgW = cardW * 0.55;
+    const metW = cardW - imgW;
+
+    posts.slice(0, 3).forEach((post, pi) => {
+      const cx = contentX + pi * (cardW + cardGap);
+      const metX = cx + imgW;
+      // Card bg
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: cx,
+        y: cardsY,
+        w: cardW,
+        h: cardsH,
+        fill: { color: cardBg },
+        line: { color: borderColor, width: 0.5 },
+        rectRadius: 0.05,
+        shadow: { type: 'outer', blur: 3, offset: 1, color: '000000', opacity: 0.04 },
+      });
+      // Image — left half, actual thumbnail or placeholder
+      if (post.image_url) {
+        slide.addImage({
+          data: post.image_url,
+          x: cx,
+          y: cardsY,
+          w: imgW,
+          h: cardsH,
+        });
+      } else {
+        slide.addShape(pptx.ShapeType.rect, {
+          x: cx,
+          y: cardsY,
+          w: imgW,
+          h: cardsH,
+          fill: { color: isDark ? '1E293B' : 'E2E8F0' },
+          line: { type: 'none' },
+        });
+      }
+      // Rank badge — top-left of metrics area (right column)
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: metX + 0.04,
+        y: cardsY + 0.05,
+        w: 0.34,
+        h: 0.16,
+        fill: { color: color },
+        line: { type: 'none' },
+        rectRadius: 0.04,
+      });
+      slide.addText(`#${pi + 1}`, {
+        x: metX + 0.04,
+        y: cardsY + 0.05,
+        w: 0.34,
+        h: 0.16,
+        fontSize: 6.5,
+        bold: true,
+        color: 'FFFFFF',
+        fontFace: font,
+        align: 'center',
+        valign: 'middle',
+      });
+      // Metrics — stacked in right column
+      const metrics = [
+        { label: 'Views', val: fmtNative(post.views) },
+        { label: 'Engagement', val: fmtNative(post.engagement) },
+        { label: 'VR Rate', val: post.vr_rate != null ? `${Number(post.vr_rate).toFixed(2)}%` : '-' },
+      ];
+      const metAreaY = cardsY + 0.26;
+      const metAreaH = cardsH - 0.26 - (post.url ? 0.18 : 0.05);
+      const mRowH = metAreaH / metrics.length;
+      metrics.forEach((m, mi) => {
+        const my = metAreaY + mi * mRowH;
+        slide.addText(m.label, {
+          x: metX + 0.04,
+          y: my,
+          w: metW - 0.06,
+          h: mRowH * 0.45,
+          fontSize: 4.5,
+          color: mutedColor,
+          fontFace: font,
+          align: 'left',
+          valign: 'bottom',
+        });
+        slide.addText(m.val, {
+          x: metX + 0.04,
+          y: my + mRowH * 0.45,
+          w: metW - 0.06,
+          h: mRowH * 0.55,
+          fontSize: 5.5,
+          bold: true,
+          color: textColor,
+          fontFace: font,
+          align: 'left',
+          valign: 'top',
+        });
+      });
+      if (post.url) {
+        slide.addText('View Post', {
+          x: metX + 0.04,
+          y: cardsY + cardsH - 0.18,
+          w: metW - 0.06,
+          h: 0.16,
+          fontSize: 5,
+          bold: true,
+          color: '3B82F6',
+          fontFace: font,
+          align: 'left',
+          valign: 'middle',
+          hyperlink: { url: post.url },
+        });
+      }
+    });
+  };
+
+  drawPostRow(data.highest, 'HIGHEST 3', COLOR_HIGH, bodyY);
+  drawPostRow(data.lowest, 'LOWEST 3', COLOR_LOW, bodyY + rowH + rowGap);
+
+  // ── Right column: Insight (full height) ───────────────────────────────────
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: rightX,
+    y: bodyY,
+    w: rightW,
+    h: bodyH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: rightX,
+    y: bodyY,
+    w: rightW,
+    h: 0.15,
+    fill: { color: primaryColor, transparency: 85 },
+    line: { type: 'none' },
+  });
+  slide.addText('Analysis', {
+    x: rightX + 0.08,
+    y: bodyY,
+    w: rightW - 0.16,
+    h: 0.15,
+    fontSize: 6,
+    bold: true,
+    color: primaryColor,
+    fontFace: font,
+    align: 'left',
+    valign: 'middle',
+  });
+  const insightText = data.insight
+    ? data.insight
+        .split('\n')
+        .filter(Boolean)
+        .map((l) =>
+          l
+            .replace(/\*\*(.*?)\*\*/g, '$1')
+            .replace(/^[-•]\s*/, '• ')
+            .trim(),
+        )
+        .join('\n')
+    : 'No insight generated.';
+  slide.addText(insightText, {
+    x: rightX + 0.08,
+    y: bodyY + 0.18,
+    w: rightW - 0.16,
+    h: bodyH - 0.22,
+    fontSize: 6.5,
+    color: data.insight ? textColor : mutedColor,
+    fontFace: font,
+    align: 'left',
+    valign: 'top',
+    italic: !data.insight,
+    paraSpaceAfter: 4,
+    lineSpacingMultiple: 1.2,
+    wrap: true,
+  });
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TikTok: Content Pillar (tiktok_page_20)
+// ─────────────────────────────────────────────────────────────────────────────
+export function createIcTtContentPillarNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcTtContentPillarExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(slide, pptx, tv, `${config.clientName} \u2014 TikTok Content Pillar`, 'tiktok', {
+    subtitle: `${config.period} \u00b7 Top 2 Pillars \u00b7 Lowest \u2192 Highest`,
+  });
+
+  const { font, isDark, textColor, mutedColor, cardBg, borderColor, primaryColor } = tv;
+
+  const contentX = 0.3;
+  const contentW = 9.4;
+  const bodyY = 0.97;
+  const footerY = 5.15;
+  const bodyH = footerY - bodyY;
+
+  // Direction label row
+  const dirH = 0.18;
+  const dirY = bodyY;
+  slide.addText('Lowest', {
+    x: contentX,
+    y: dirY,
+    w: 0.45,
+    h: dirH,
+    fontSize: 6,
+    bold: true,
+    color: mutedColor,
+    fontFace: font,
+    align: 'left',
+    valign: 'middle',
+  });
+  slide.addText('\u2192 Highest', {
+    x: contentX + contentW - 0.55,
+    y: dirY,
+    w: 0.55,
+    h: dirH,
+    fontSize: 6,
+    bold: true,
+    color: mutedColor,
+    fontFace: font,
+    align: 'right',
+    valign: 'middle',
+  });
+
+  const pillarStartY = bodyY + dirH + 0.06;
+  const pillarGap = 0.08;
+  // Always use half-height per pillar (as if 2 pillars) so size is consistent
+  const pillarH = (bodyH - dirH - 0.06 - pillarGap) / 2;
+
+  const insightW = contentW * 0.28;
+  const postsW = contentW - insightW - 0.08;
+  const insightX = contentX + postsW + 0.08;
+
+  const cardCount = 3;
+  const cardGap = 0.06;
+  const cardW = (postsW - (cardCount - 1) * cardGap) / cardCount;
+
+  data.pillars.slice(0, 2).forEach((pData, pi) => {
+    const py = pillarStartY + pi * (pillarH + pillarGap);
+
+    // Pillar label bar
+    slide.addShape(pptx.ShapeType.rect, {
+      x: contentX,
+      y: py,
+      w: 0.04,
+      h: pillarH,
+      fill: { color: primaryColor },
+      line: { type: 'none' },
+    });
+    slide.addText(pData.pillar.toUpperCase(), {
+      x: contentX + 0.08,
+      y: py,
+      w: postsW - 0.08,
+      h: 0.16,
+      fontSize: 6,
+      bold: true,
+      color: isDark ? 'E2E8F0' : '475569',
+      fontFace: font,
+      align: 'left',
+      valign: 'middle',
+    });
+
+    // Post cards — image LEFT, metrics RIGHT
+    const cardsY = py + 0.18;
+    const cardH = pillarH - 0.18;
+    // Horizontal split: image 54%, metrics 46%
+    const imgW = cardW * 0.54;
+    const metW = cardW - imgW;
+
+    pData.posts.slice(0, 3).forEach((post, ci) => {
+      const cx = contentX + ci * (cardW + cardGap);
+      const metX = cx + imgW;
+      // Card bg
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: cx,
+        y: cardsY,
+        w: cardW,
+        h: cardH,
+        fill: { color: cardBg },
+        line: { color: borderColor, width: 0.5 },
+        rectRadius: 0.05,
+        shadow: { type: 'outer', blur: 3, offset: 1, color: '000000', opacity: 0.04 },
+      });
+      // Image — left half, actual thumbnail or placeholder
+      if (post.image_url) {
+        slide.addImage({
+          data: post.image_url,
+          x: cx,
+          y: cardsY,
+          w: imgW,
+          h: cardH,
+        });
+      } else {
+        slide.addShape(pptx.ShapeType.rect, {
+          x: cx,
+          y: cardsY,
+          w: imgW,
+          h: cardH,
+          fill: { color: isDark ? '1E293B' : 'E2E8F0' },
+          line: { type: 'none' },
+        });
+      }
+      // Rank badge — top-left of metrics area (right column)
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: metX + 0.04,
+        y: cardsY + 0.04,
+        w: 0.32,
+        h: 0.15,
+        fill: { color: primaryColor },
+        line: { type: 'none' },
+        rectRadius: 0.04,
+      });
+      slide.addText(`#${ci + 1}`, {
+        x: metX + 0.04,
+        y: cardsY + 0.04,
+        w: 0.32,
+        h: 0.15,
+        fontSize: 6,
+        bold: true,
+        color: 'FFFFFF',
+        fontFace: font,
+        align: 'center',
+        valign: 'middle',
+      });
+
+      // Metrics — stacked in right column
+      const metrics: { label: string; val: string }[] = [
+        {
+          label: 'Date',
+          val: post.post_date
+            ? new Date(post.post_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+            : '-',
+        },
+        { label: 'VR', val: post.vr_rate != null ? `${Number(post.vr_rate).toFixed(1)}%` : '-' },
+        { label: 'Views', val: fmtNative(post.views) },
+        { label: 'Eng', val: fmtNative(post.engagement) },
+        { label: 'Avg WT', val: post.avg_watch_time != null ? `${Number(post.avg_watch_time).toFixed(1)}s` : '-' },
+      ];
+      const metAreaY = cardsY + 0.24;
+      const metAreaH = cardH - 0.24 - (post.url ? 0.16 : 0.04);
+      const mRowH = metAreaH / metrics.length;
+      metrics.forEach((m, mi) => {
+        const my = metAreaY + mi * mRowH;
+        slide.addText(m.label, {
+          x: metX + 0.04,
+          y: my,
+          w: metW - 0.06,
+          h: mRowH * 0.42,
+          fontSize: 4,
+          color: mutedColor,
+          fontFace: font,
+          align: 'left',
+          valign: 'bottom',
+        });
+        slide.addText(m.val, {
+          x: metX + 0.04,
+          y: my + mRowH * 0.42,
+          w: metW - 0.06,
+          h: mRowH * 0.58,
+          fontSize: 4.5,
+          bold: true,
+          color: textColor,
+          fontFace: font,
+          align: 'left',
+          valign: 'top',
+        });
+      });
+      if (post.url) {
+        slide.addText('Link', {
+          x: metX + 0.04,
+          y: cardsY + cardH - 0.16,
+          w: metW - 0.06,
+          h: 0.14,
+          fontSize: 4.5,
+          bold: true,
+          color: '3B82F6',
+          fontFace: font,
+          align: 'left',
+          valign: 'middle',
+          hyperlink: { url: post.url },
+        });
+      }
+    });
+
+    // Insight box
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: insightX,
+      y: py,
+      w: insightW,
+      h: pillarH,
+      fill: { color: cardBg },
+      line: { color: borderColor, width: 0.75 },
+      rectRadius: 0.08,
+      shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: insightX,
+      y: py,
+      w: insightW,
+      h: 0.15,
+      fill: { color: primaryColor, transparency: 85 },
+      line: { type: 'none' },
+    });
+    slide.addText(`Insight: ${pData.pillar}`, {
+      x: insightX + 0.08,
+      y: py,
+      w: insightW - 0.16,
+      h: 0.15,
+      fontSize: 5.5,
+      bold: true,
+      color: primaryColor,
+      fontFace: font,
+      align: 'left',
+      valign: 'middle',
+    });
+    const iText = pData.insight
+      ? pData.insight
+          .split('\n')
+          .filter(Boolean)
+          .map((l) =>
+            l
+              .replace(/\*\*(.*?)\*\*/g, '$1')
+              .replace(/^[-•]\s*/, '• ')
+              .trim(),
+          )
+          .join('\n')
+      : 'No insight generated.';
+    slide.addText(iText, {
+      x: insightX + 0.08,
+      y: py + 0.18,
+      w: insightW - 0.16,
+      h: pillarH - 0.22,
+      fontSize: 6,
+      color: pData.insight ? textColor : mutedColor,
+      fontFace: font,
+      align: 'left',
+      valign: 'top',
+      italic: !pData.insight,
+      paraSpaceAfter: 4,
+      lineSpacingMultiple: 1.2,
+      wrap: true,
+    });
+  });
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ── ic_ig_cp_eng (Slides 11 & 12) ────────────────────────────────────────────
+interface IcCpPillarRow {
+  content_pillar: string;
+  value: number;
+}
+interface IcCpDeltaRow {
+  content_pillar: string;
+  inc: number | null;
+}
+
+interface IcIgCpEngExportData {
+  aon: boolean;
+  currMonth: string;
+  prevMonth: string;
+  engCurr: IcCpPillarRow[];
+  engPrev: IcCpPillarRow[];
+  postCurr: IcCpPillarRow[];
+  postPrev: IcCpPillarRow[];
+  deltaEng: IcCpDeltaRow[];
+  deltaPost: IcCpDeltaRow[];
+  currentPage: number;
+  totalPages: number;
+}
+
+function fmtPct(v: number | null): string {
+  if (v === null || v === undefined || isNaN(v as number)) return '-';
+  return `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(0)}%`;
+}
+
+function buildAlignedRows(
+  curr: IcCpPillarRow[],
+  prev: IcCpPillarRow[],
+): { pillar: string; currVal: number; prevVal: number }[] {
+  const all = Array.from(
+    new Set([
+      ...curr.map((r: IcCpPillarRow) => r.content_pillar),
+      ...prev.map((r: IcCpPillarRow) => r.content_pillar),
+    ]),
+  ).sort();
+  const cm = Object.fromEntries(curr.map((r: IcCpPillarRow) => [r.content_pillar, r.value]));
+  const pm = Object.fromEntries(prev.map((r: IcCpPillarRow) => [r.content_pillar, r.value]));
+  return all.map((p: string) => ({
+    pillar: p,
+    currVal: (cm as any)[p] ?? 0,
+    prevVal: (pm as any)[p] ?? 0,
+  }));
+}
+
+const MONTH_ID_PPTX: Record<string, string> = {
+  '01': 'Jan',
+  '02': 'Feb',
+  '03': 'Mar',
+  '04': 'Apr',
+  '05': 'Mei',
+  '06': 'Jun',
+  '07': 'Jul',
+  '08': 'Agu',
+  '09': 'Sep',
+  '10': 'Okt',
+  '11': 'Nov',
+  '12': 'Des',
+};
+function monthLabelPptx(mmYyyy: string) {
+  const [mm, yyyy] = mmYyyy.split('-');
+  return `${MONTH_ID_PPTX[mm] ?? mm} ${yyyy}`;
+}
+
+function drawCpBarChart(
+  slide: PptxGenJS.Slide,
+  tv: SlideThemeVars,
+  rows: { pillar: string; currVal: number; prevVal: number }[],
+  prevLabel: string,
+  currLabel: string,
+  title: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+) {
+  const { font, isDark, mutedColor, primaryColor, cardBg, borderColor } = tv;
+  const BAR_PREV = '4FC1E9';
+
+  // Card background
+  slide.addShape('roundRect' as any, {
+    x,
+    y,
+    w,
+    h,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+  });
+
+  // Section title
+  slide.addText(title, {
+    x: x + 0.1,
+    y: y + 0.04,
+    w: w - 0.2,
+    h: 0.17,
+    fontSize: 7,
+    bold: true,
+    color: isDark ? 'E2E8F0' : '475569',
+    fontFace: font,
+    align: 'left',
+    valign: 'middle',
+  });
+
+  if (rows.length === 0) {
+    slide.addText('No data', {
+      x,
+      y: y + h / 2,
+      w,
+      h: 0.2,
+      fontSize: 8,
+      color: mutedColor,
+      fontFace: font,
+      align: 'center',
+    });
+    return;
+  }
+
+  const labels = rows.map((r: any) =>
+    r.pillar.length > 14 ? r.pillar.substring(0, 13) + '...' : r.pillar,
+  );
+  // Replace 0 with null → no bar rendered, no data label rendered
+  const prevVals = rows.map((r: any) => (r.prevVal === 0 ? null : r.prevVal)) as any[];
+  const currVals = rows.map((r: any) => (r.currVal === 0 ? null : r.currVal)) as any[];
+
+  // Layout: two charts side by side, matching preview layout
+  const pad = 0.06;
+  const gap = 0.06;
+  const titleH = 0.22;
+  const lblH = 0.14;
+  const chartY = y + titleH + lblH;
+  const chartH = h - titleH - lblH - 0.05;
+  const cW = (w - pad * 2 - gap) / 2;
+  const cx1 = x + pad;
+  const cx2 = cx1 + cW + gap;
+
+  // Month labels
+  slide.addText(prevLabel, {
+    x: cx1,
+    y: y + titleH,
+    w: cW,
+    h: lblH,
+    fontSize: 5.5,
+    color: mutedColor,
+    fontFace: font,
+    align: 'center',
+  });
+  slide.addText(currLabel, {
+    x: cx2,
+    y: y + titleH,
+    w: cW,
+    h: lblH,
+    fontSize: 5.5,
+    bold: true,
+    color: primaryColor,
+    fontFace: font,
+    align: 'center',
+  });
+
+  // Centre divider
+  slide.addShape('line' as any, {
+    x: cx2 - gap / 2,
+    y: y + titleH,
+    w: 0,
+    h: h - titleH - 0.04,
+    line: { color: borderColor, width: 0.5 },
+  });
+
+  const sharedOpts = {
+    barDir: 'bar',
+    barGrouping: 'clustered',
+    barGapWidthPct: 20,
+    showLegend: false,
+    showValue: true,
+    dataLabelFontSize: 6.5,
+    dataLabelColor: isDark ? 'FFFFFF' : '374151',
+    dataLabelFormatCode: '#,##0.##',
+    catAxisLabelFontSize: 5.5,
+    catAxisLabelColor: mutedColor,
+    valAxisLabelFontSize: 5.5,
+    valAxisLabelColor: mutedColor,
+    valLabelFormatCode: '#,##0;-#,##0;""',
+    valAxisLineShow: false,
+    catAxisLineShow: false,
+    showTitle: false,
+  } as any;
+
+  // Left chart — previous month (blue)
+  slide.addChart('bar' as any, [{ name: prevLabel, labels, values: prevVals }], {
+    x: cx1,
+    y: chartY,
+    w: cW,
+    h: chartH,
+    chartColors: [BAR_PREV],
+    ...sharedOpts,
+  } as any);
+
+  // Right chart — current month (primary color)
+  slide.addChart('bar' as any, [{ name: currLabel, labels, values: currVals }], {
+    x: cx2,
+    y: chartY,
+    w: cW,
+    h: chartH,
+    chartColors: [primaryColor],
+    ...sharedOpts,
+  } as any);
+}
+
+function drawDeltaPanel(
+  slide: PptxGenJS.Slide,
+  tv: SlideThemeVars,
+  title: string,
+  pillars: string[],
+  deltas: IcCpDeltaRow[],
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+) {
+  const { font, isDark, cardBg, borderColor, primaryColor, mutedColor } = tv;
+
+  slide.addShape('roundRect' as any, {
+    x,
+    y,
+    w,
+    h,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+  });
+
+  slide.addText(title, {
+    x: x + 0.1,
+    y: y + 0.06,
+    w: w - 0.2,
+    h: 0.18,
+    fontSize: 6.5,
+    bold: true,
+    color: primaryColor,
+    fontFace: font,
+    align: 'left',
+    valign: 'middle',
+  });
+
+  const deltaMap = Object.fromEntries(deltas.map((d: IcCpDeltaRow) => [d.content_pillar, d.inc]));
+  const rowH = Math.min(0.22, (h - 0.28) / Math.max(pillars.length, 1));
+  let ry = y + 0.28;
+
+  pillars.forEach((p: string) => {
+    const inc = (deltaMap as any)[p] ?? null;
+    const label = fmtPct(inc);
+    const color = inc === null ? mutedColor : inc >= 0 ? '16A34A' : 'DC2626';
+
+    slide.addText(p.length > 12 ? p.substring(0, 11) + '...' : p, {
+      x: x + 0.08,
+      y: ry,
+      w: w * 0.6,
+      h: rowH,
+      fontSize: 5.5,
+      color: isDark ? '94A3B8' : '64748B',
+      fontFace: font,
+      align: 'left',
+      valign: 'middle',
+    });
+    slide.addText(label, {
+      x: x + w * 0.58,
+      y: ry,
+      w: w * 0.38,
+      h: rowH,
+      fontSize: 6,
+      bold: true,
+      color,
+      fontFace: font,
+      align: 'right',
+      valign: 'middle',
+    });
+    ry += rowH;
+  });
+}
+
+export function createIcIgCpEngNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcIgCpEngExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+
+  const aonLabel = data.aon ? 'AON (Brand-Owned)' : 'Non-AON (Client)';
+  drawSlideHeader(
+    slide,
+    pptx,
+    tv,
+    `${config.clientName} \u2014 Content Pillar \u2014 ${aonLabel}`,
+    'instagram',
+    { subtitle: `${config.period} \u00b7 Avg Engagement & Total Post per Pillar` },
+  );
+
+  const { primaryColor, font } = tv;
+  const prevLabel = monthLabelPptx(data.prevMonth);
+  const currLabel = monthLabelPptx(data.currMonth);
+
+  const engRows = buildAlignedRows(data.engCurr, data.engPrev);
+  const postRows = buildAlignedRows(data.postCurr, data.postPrev);
+  const allPillars = engRows.map((r: any) => r.pillar);
+
+  const bodyY = 0.97;
+  const bodyH = 5.15 - bodyY;
+  const rowH = (bodyH - 0.1) / 2;
+  const chartX = 0.3;
+  const chartW = 7.0;
+  const deltaX = 7.4;
+  const deltaW = 2.25;
+
+  drawCpBarChart(
+    slide,
+    tv,
+    engRows,
+    prevLabel,
+    currLabel,
+    'Average Engagement',
+    chartX,
+    bodyY,
+    chartW,
+    rowH,
+  );
+  drawDeltaPanel(
+    slide,
+    tv,
+    'Avg Engagement \u0394',
+    allPillars,
+    data.deltaEng,
+    deltaX,
+    bodyY,
+    deltaW,
+    rowH,
+  );
+
+  drawCpBarChart(
+    slide,
+    tv,
+    postRows,
+    prevLabel,
+    currLabel,
+    'Total Post',
+    chartX,
+    bodyY + rowH + 0.1,
+    chartW,
+    rowH,
+  );
+  drawDeltaPanel(
+    slide,
+    tv,
+    'Total Post \u0394',
+    allPillars,
+    data.deltaPost,
+    deltaX,
+    bodyY + rowH + 0.1,
+    deltaW,
+    rowH,
+  );
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Twitter: Growth (twitter_page_22)
+// ─────────────────────────────────────────────────────────────────────────────
+interface IcTwGrowthExportData {
+  chartData: { date: string; new_follows: number; impressions: number; engagement: number }[];
+  tableRows: {
+    month: string;
+    post_count: string;
+    followers_growth: string;
+    impressions: string;
+    engagement: string;
+  }[];
+  insight: string;
+  currentPage: number;
+  totalPages: number;
+}
+
+export function createIcTwGrowthNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcTwGrowthExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(slide, pptx, tv, `${config.clientName} \u2014 Twitter Growth`, 'twitter', {
+    subtitle: `${config.period} \u00b7 New Follows \u00b7 Impressions \u00b7 Engagement`,
+  });
+
+  const { font, isDark, textColor, mutedColor, cardBg, borderColor, primaryColor } = tv;
+  const contentX = 0.3;
+  const contentW = 9.4;
+  const bodyY = 0.97;
+  const footerY = 5.15;
+  const bodyH = footerY - bodyY;
+  const gap = 0.12;
+  const insightW = contentW * 0.28;
+  const chartAreaW = contentW - insightW - gap;
+  const insightX = contentX + chartAreaW + gap;
+  const tableH = 1.1;
+  const tableGap = 0.08;
+  const chartsH = bodyH - tableH - tableGap;
+
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: contentX,
+    y: bodyY,
+    w: chartAreaW,
+    h: chartsH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: contentX,
+    y: bodyY,
+    w: chartAreaW,
+    h: 0.03,
+    fill: { color: primaryColor },
+    line: { type: 'none' },
+  });
+
+  if (data.chartData.length > 0) {
+    const monthNames = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    const labels = data.chartData.map((d) => {
+      const parts = (d.date ?? '').split('-');
+      if (parts.length >= 3) {
+        const mo = parseInt(parts[1], 10);
+        return `${monthNames[(mo - 1) % 12]}-${parts[2].slice(0, 2)}`;
+      }
+      return d.date ?? '';
+    });
+    const followsSeries = data.chartData.map((d) => d.new_follows ?? 0);
+    const impSeries = data.chartData.map((d) => d.impressions ?? 0);
+    const engSeries = data.chartData.map((d) => d.engagement ?? 0);
+    const symSize = labels.length > 15 ? 2 : 4;
+    const labelFreq = labels.length > 20 ? Math.ceil(labels.length / 10) : 1;
+    const axisOpts = {
+      showLegend: false,
+      showTitle: false,
+      lineSmooth: false,
+      lineSize: 1.5,
+      lineDataSymbolSize: symSize,
+      valGridLine: { style: 'dash' as const, color: isDark ? '334155' : 'E2E8F0' },
+      catGridLine: { style: 'none' as const },
+      catAxisLabelFontSize: 6,
+      valAxisLabelFontSize: 6,
+      catAxisLabelColor: mutedColor,
+      valAxisLabelColor: mutedColor,
+      catAxisLineShow: false,
+      valAxisLineShow: false,
+      catAxisLabelFrequency: String(labelFreq),
+    };
+    const labelH = 0.12;
+    const subGap = 0.04;
+    const totalUsable = chartsH - 0.08 - 3 * labelH - 2 * subGap;
+    const subH = totalUsable / 3;
+
+    const c1Y = bodyY + 0.06;
+    slide.addText('New Follows', {
+      x: contentX + 0.1,
+      y: c1Y,
+      w: chartAreaW - 0.2,
+      h: labelH,
+      fontSize: 5.5,
+      bold: true,
+      color: isDark ? 'CBD5E1' : '475569',
+      fontFace: font,
+    });
+    slide.addChart(pptx.ChartType.line, [{ name: 'New Follows', labels, values: followsSeries }], {
+      ...axisOpts,
+      valAxisMinVal: 0,
+      chartColors: ['E67E22'],
+      x: contentX + 0.05,
+      y: c1Y + labelH,
+      w: chartAreaW - 0.1,
+      h: subH,
+    });
+    const c2Y = c1Y + labelH + subH + subGap;
+    slide.addText('Impressions', {
+      x: contentX + 0.1,
+      y: c2Y,
+      w: chartAreaW - 0.2,
+      h: labelH,
+      fontSize: 5.5,
+      bold: true,
+      color: isDark ? 'CBD5E1' : '475569',
+      fontFace: font,
+    });
+    slide.addChart(pptx.ChartType.line, [{ name: 'Impressions', labels, values: impSeries }], {
+      ...axisOpts,
+      valAxisMinVal: 0,
+      chartColors: ['3B82F6'],
+      x: contentX + 0.05,
+      y: c2Y + labelH,
+      w: chartAreaW - 0.1,
+      h: subH,
+    });
+    const c3Y = c2Y + labelH + subH + subGap;
+    slide.addText('Engagement', {
+      x: contentX + 0.1,
+      y: c3Y,
+      w: chartAreaW - 0.2,
+      h: labelH,
+      fontSize: 5.5,
+      bold: true,
+      color: isDark ? 'CBD5E1' : '475569',
+      fontFace: font,
+    });
+    slide.addChart(pptx.ChartType.bar, [{ name: 'Engagement', labels, values: engSeries }], {
+      ...axisOpts,
+      valAxisMinVal: 0,
+      chartColors: ['2980B9'],
+      barDir: 'col' as const,
+      x: contentX + 0.05,
+      y: c3Y + labelH,
+      w: chartAreaW - 0.1,
+      h: subH,
+    });
+  }
+
+  drawSlideInsight(slide, pptx, tv, {
+    x: insightX,
+    y: bodyY,
+    w: insightW,
+    h: chartsH,
+    label: 'Analysis',
+    text: data.insight || '',
+  });
+
+  const tableY = bodyY + chartsH + tableGap;
+  const headers = ['Month', 'Post Count', 'Followers Growth', 'Impressions', 'Engagement'];
+  if (data.tableRows.length > 0) {
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: contentX,
+      y: tableY,
+      w: contentW,
+      h: tableH,
+      fill: { color: cardBg },
+      line: { color: borderColor, width: 0.75 },
+      rectRadius: 0.08,
+      shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: contentX,
+      y: tableY,
+      w: contentW,
+      h: 0.03,
+      fill: { color: primaryColor },
+      line: { type: 'none' },
+    });
+    const monthColW = 0.85;
+    const otherColW = (contentW - monthColW - 0.1) / (headers.length - 1);
+    const colWidths = [monthColW, ...Array(headers.length - 1).fill(otherColW)];
+    const rowH_tbl = (tableH - 0.1) / (data.tableRows.length + 1);
+    const headerRow = headers.map((h, ci) => ({
+      text: h,
+      options: {
+        bold: true,
+        fontSize: 6,
+        color: 'FFFFFF',
+        fontFace: font,
+        align: (ci === 0 ? 'left' : 'center') as 'left' | 'center',
+        fill: { color: primaryColor },
+      },
+    }));
+    const dataRows = data.tableRows.map((row, ri) => {
+      const vals = [
+        row.month,
+        row.post_count,
+        row.followers_growth,
+        row.impressions,
+        row.engagement,
+      ];
+      return vals.map((cell, ci) => ({
+        text: cell ?? '-',
+        options: {
+          fontSize: 6.5,
+          color: textColor,
+          fontFace: font,
+          align: (ci === 0 ? 'left' : 'center') as 'left' | 'center',
+          bold: ci === 0,
+          fill: { color: ri % 2 === 0 ? cardBg : isDark ? '1A2535' : 'F8FAFC' },
+        },
+      }));
+    });
+    slide.addTable([headerRow, ...dataRows], {
+      x: contentX + 0.05,
+      y: tableY + 0.06,
+      w: contentW - 0.1,
+      h: tableH - 0.09,
+      colW: colWidths,
+      rowH: rowH_tbl,
+      border: { type: 'solid', color: borderColor, pt: 0.4 },
+      fontFace: font,
+    });
+  }
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Twitter: Best & Least (twitter_page_24)
+// ─────────────────────────────────────────────────────────────────────────────
+interface IcTwPost {
+  date: string | null;
+  url: string | null;
+  impressions: number | null;
+  er: number | null;
+  engagement: number | null;
+  image_url?: string | null;
+}
+
+interface IcTwBestLeastExportData {
+  highest: IcTwPost[];
+  lowest: IcTwPost[];
+  insight: string;
+  currentPage: number;
+  totalPages: number;
+}
+
+export function createIcTwBestLeastNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcTwBestLeastExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(slide, pptx, tv, `${config.clientName} \u2014 Twitter Best & Least`, 'twitter', {
+    subtitle: `${config.period} \u00b7 Top 3 & Bottom 3 by Impressions`,
+  });
+
+  const { font, isDark, textColor, mutedColor, cardBg, borderColor, primaryColor } = tv;
+  const COLOR_HIGH = '16A34A';
+  const COLOR_LOW = 'DC2626';
+  const contentX = 0.3;
+  const contentW = 9.4;
+  const bodyY = 0.97;
+  const footerY = 5.15;
+  const bodyH = footerY - bodyY;
+  const gap = 0.1;
+  const rightW = contentW * 0.28;
+  const leftW = contentW - rightW - gap;
+  const rightX = contentX + leftW + gap;
+  const rowGap = 0.08;
+  const rowH = (bodyH - rowGap) / 2;
+
+  const drawPostRow = (posts: IcTwPost[], label: string, color: string, rowY: number) => {
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: contentX,
+      y: rowY,
+      w: leftW,
+      h: 0.17,
+      fill: { color, transparency: 88 },
+      line: { color, width: 0.5, transparency: 70 },
+      rectRadius: 0.04,
+    });
+    slide.addText(label, {
+      x: contentX + 0.1,
+      y: rowY,
+      w: leftW - 0.2,
+      h: 0.17,
+      fontSize: 6.5,
+      bold: true,
+      color,
+      fontFace: font,
+      align: 'left',
+      valign: 'middle',
+    });
+    const cardsY = rowY + 0.2;
+    const cardsH = rowH - 0.2;
+    const cardGap = 0.06;
+    const cardW = (leftW - 2 * cardGap) / 3;
+    // Vertical: image TOP 55%, metrics BOTTOM 45%
+    const imgH = cardsH * 0.55;
+    const metH = cardsH - imgH;
+
+    posts.slice(0, 3).forEach((post, pi) => {
+      const cx = contentX + pi * (cardW + cardGap);
+      // Card bg
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: cx, y: cardsY, w: cardW, h: cardsH,
+        fill: { color: cardBg },
+        line: { color: borderColor, width: 0.5 },
+        rectRadius: 0.05,
+        shadow: { type: 'outer', blur: 3, offset: 1, color: '000000', opacity: 0.04 },
+      });
+      // Image — top
+      if (post.image_url) {
+        slide.addImage({ data: post.image_url, x: cx, y: cardsY, w: cardW, h: imgH });
+      } else {
+        slide.addShape(pptx.ShapeType.rect, {
+          x: cx, y: cardsY, w: cardW, h: imgH,
+          fill: { color: isDark ? '1E293B' : 'E2E8F0' },
+          line: { type: 'none' },
+        });
+      }
+      // Rank badge
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: cx + 0.04, y: cardsY + 0.04, w: 0.36, h: 0.16,
+        fill: { color }, line: { type: 'none' }, rectRadius: 0.04,
+      });
+      slide.addText(`#${pi + 1}`, {
+        x: cx + 0.04, y: cardsY + 0.04, w: 0.36, h: 0.16,
+        fontSize: 6.5, bold: true, color: 'FFFFFF', fontFace: font,
+        align: 'center', valign: 'middle',
+      });
+      // Metrics — bottom
+      const metrics = [
+        { label: 'Impress.', val: fmtNative(post.impressions) },
+        { label: 'Eng.', val: fmtNative(post.engagement) },
+        { label: 'ER', val: post.er != null ? `${Number(post.er).toFixed(2)}%` : '-' },
+      ];
+      const extraRows = (post.date ? 0.5 : 0) + (post.url ? 1 : 0);
+      const mRowH = metH / (metrics.length + extraRows);
+      metrics.forEach((m, mi) => {
+        const my = cardsY + imgH + mi * mRowH;
+        slide.addText(m.label, {
+          x: cx + 0.04, y: my, w: cardW * 0.46, h: mRowH,
+          fontSize: 4.5, color: mutedColor, fontFace: font, align: 'left', valign: 'middle',
+        });
+        slide.addText(m.val, {
+          x: cx + cardW * 0.46, y: my, w: cardW * 0.54 - 0.04, h: mRowH,
+          fontSize: 5, bold: true, color: textColor, fontFace: font, align: 'right', valign: 'middle',
+        });
+      });
+      let off = metrics.length;
+      if (post.date) {
+        slide.addText(String(post.date).slice(0, 10), {
+          x: cx + 0.04, y: cardsY + imgH + off * mRowH, w: cardW - 0.08, h: mRowH * 0.5,
+          fontSize: 4, color: mutedColor, fontFace: font, align: 'left', valign: 'middle',
+        });
+        off += 0.5;
+      }
+      if (post.url) {
+        slide.addText('View tweet', {
+          x: cx + 0.04, y: cardsY + imgH + off * mRowH, w: cardW - 0.08, h: mRowH,
+          fontSize: 4.5, bold: true, color: '3B82F6', fontFace: font,
+          align: 'right', valign: 'middle', hyperlink: { url: post.url },
+        });
+      }
+    });
+  };
+
+  drawPostRow(data.highest, 'HIGHEST BY IMPRESSIONS', COLOR_HIGH, bodyY);
+  drawPostRow(data.lowest, 'LOWEST BY IMPRESSIONS', COLOR_LOW, bodyY + rowH + rowGap);
+
+  // Analysis panel
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: rightX,
+    y: bodyY,
+    w: rightW,
+    h: bodyH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: rightX,
+    y: bodyY,
+    w: rightW,
+    h: 0.15,
+    fill: { color: primaryColor, transparency: 85 },
+    line: { type: 'none' },
+  });
+  slide.addText('Analysis', {
+    x: rightX + 0.08,
+    y: bodyY,
+    w: rightW - 0.16,
+    h: 0.15,
+    fontSize: 6,
+    bold: true,
+    color: primaryColor,
+    fontFace: font,
+    align: 'left',
+    valign: 'middle',
+  });
+  const insightText = data.insight
+    ? data.insight
+        .split('\n')
+        .filter(Boolean)
+        .map((l) =>
+          l
+            .replace(/\*\*(.*?)\*\*/g, '$1')
+            .replace(/^[-•]\s*/, '• ')
+            .trim(),
+        )
+        .join('\n')
+    : 'No insight generated.';
+  slide.addText(insightText, {
+    x: rightX + 0.08,
+    y: bodyY + 0.18,
+    w: rightW - 0.16,
+    h: bodyH - 0.22,
+    fontSize: 6.5,
+    color: data.insight ? textColor : mutedColor,
+    fontFace: font,
+    align: 'left',
+    valign: 'top',
+    italic: !data.insight,
+    paraSpaceAfter: 4,
+    lineSpacingMultiple: 1.2,
+    wrap: true,
+  });
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Twitter: Content Overview (twitter_page_23)
+// ─────────────────────────────────────────────────────────────────────────────
+interface IcTwContentPost {
+  content_pillar: string;
+  date: string | null;
+  engagement: number | null;
+  impressions: number | null;
+  er: number | null;
+  url: string | null;
+  image_url?: string | null;
+}
+
+interface IcTwContentExportData {
+  brandOwned: IcTwContentPost[];
+  nonBrandOwned: IcTwContentPost[];
+  insight: string;
+  currentPage: number;
+  totalPages: number;
+}
+
+export function createIcTwContentNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcTwContentExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(
+    slide,
+    pptx,
+    tv,
+    `${config.clientName} \u2014 Twitter Content Overview`,
+    'twitter',
+    {
+      subtitle: `${config.period} \u00b7 by Impressions \u00b7 Brand-owned & Per-pillar`,
+    },
+  );
+
+  const { font, isDark, textColor, mutedColor, cardBg, borderColor, primaryColor } = tv;
+  const TW_BLUE = '0078D7';
+  const contentX = 0.3;
+  const contentW = 9.4;
+  const bodyY = 0.97;
+  const footerY = 5.15;
+  const bodyH = footerY - bodyY;
+  const gap = 0.1;
+  const rightW = contentW * 0.32;
+  const leftW = contentW - rightW - gap;
+  const rightX = contentX + leftW + gap;
+  const CARD_W = 130 / 96; // ~1.35"
+  const cardGap = 0.08;
+
+  const drawTwCard = (
+    post: IcTwContentPost,
+    accentColor: string,
+    cx: number,
+    cy: number,
+    cardH: number,
+  ) => {
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: cx,
+      y: cy,
+      w: CARD_W,
+      h: cardH,
+      fill: { color: cardBg },
+      line: { color: borderColor, width: 0.5 },
+      rectRadius: 0.05,
+      shadow: { type: 'outer', blur: 3, offset: 1, color: '000000', opacity: 0.04 },
+    });
+    slide.addShape(pptx.ShapeType.rect, {
+      x: cx,
+      y: cy,
+      w: CARD_W,
+      h: 0.15,
+      fill: { color: accentColor },
+      line: { type: 'none' },
+    });
+    slide.addText((post.content_pillar || 'General').toUpperCase(), {
+      x: cx + 0.04,
+      y: cy,
+      w: CARD_W - 0.08,
+      h: 0.15,
+      fontSize: 5,
+      bold: true,
+      color: 'FFFFFF',
+      fontFace: font,
+      align: 'left',
+      valign: 'middle',
+    });
+    const imgH = cardH * 0.44;
+    if (post.image_url) {
+      slide.addImage({
+        data: post.image_url,
+        x: cx,
+        y: cy + 0.15,
+        w: CARD_W,
+        h: imgH,
+      });
+    } else {
+      slide.addShape(pptx.ShapeType.rect, {
+        x: cx,
+        y: cy + 0.15,
+        w: CARD_W,
+        h: imgH,
+        fill: { color: isDark ? '1E293B' : 'E2E8F0' },
+        line: { type: 'none' },
+      });
+    }
+    const metY = cy + 0.15 + imgH;
+    const metH = cardH - 0.15 - imgH;
+    const metrics = [
+      { label: 'Impress.', val: fmtNative(post.impressions) },
+      { label: 'Eng.', val: fmtNative(post.engagement) },
+      { label: 'ER', val: post.er != null ? `${Number(post.er).toFixed(2)}%` : '-' },
+    ];
+    const extraRows = (post.date ? 0.5 : 0) + (post.url ? 1 : 0);
+    const mRowH = metH / (metrics.length + extraRows);
+    metrics.forEach((m, mi) => {
+      const my = metY + mi * mRowH;
+      slide.addText(m.label, {
+        x: cx + 0.03,
+        y: my,
+        w: CARD_W * 0.48,
+        h: mRowH,
+        fontSize: 4.5,
+        color: mutedColor,
+        fontFace: font,
+        align: 'left',
+        valign: 'middle',
+      });
+      slide.addText(m.val, {
+        x: cx + CARD_W * 0.48,
+        y: my,
+        w: CARD_W * 0.52 - 0.03,
+        h: mRowH,
+        fontSize: 5,
+        bold: true,
+        color: textColor,
+        fontFace: font,
+        align: 'right',
+        valign: 'middle',
+      });
+    });
+    let off = metrics.length;
+    if (post.date) {
+      slide.addText(String(post.date).slice(0, 10), {
+        x: cx + 0.03,
+        y: metY + off * mRowH,
+        w: CARD_W - 0.06,
+        h: mRowH * 0.5,
+        fontSize: 4,
+        color: mutedColor,
+        fontFace: font,
+        align: 'left',
+        valign: 'middle',
+      });
+      off += 0.5;
+    }
+    if (post.url) {
+      slide.addText('View tweet', {
+        x: cx + 0.03,
+        y: metY + off * mRowH,
+        w: CARD_W - 0.06,
+        h: mRowH,
+        fontSize: 4.5,
+        bold: true,
+        color: '3B82F6',
+        fontFace: font,
+        align: 'right',
+        valign: 'middle',
+        hyperlink: { url: post.url },
+      });
+    }
+  };
+
+  const brandH = bodyH * 0.35;
+  const nonBrandH = bodyH - brandH - 0.08;
+  const nonBrandY = bodyY + brandH + 0.08;
+
+  // Brand-owned section
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: contentX,
+    y: bodyY,
+    w: leftW,
+    h: brandH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: contentX,
+    y: bodyY,
+    w: leftW,
+    h: 0.03,
+    fill: { color: primaryColor },
+    line: { type: 'none' },
+  });
+  slide.addText('Brand-owned', {
+    x: contentX + 0.1,
+    y: bodyY + 0.04,
+    w: leftW - 0.2,
+    h: 0.17,
+    fontSize: 6,
+    bold: true,
+    color: primaryColor,
+    fontFace: font,
+    align: 'left',
+    valign: 'middle',
+  });
+  if (data.brandOwned.length === 0) {
+    slide.addText('No brand-owned data', {
+      x: contentX + 0.1,
+      y: bodyY + 0.28,
+      w: leftW - 0.2,
+      h: brandH - 0.32,
+      fontSize: 7,
+      color: mutedColor,
+      fontFace: font,
+      align: 'center',
+      valign: 'middle',
+    });
+  } else {
+    const cardH = brandH - 0.28;
+    data.brandOwned
+      .slice(0, 1)
+      .forEach((post, i) =>
+        drawTwCard(
+          post,
+          primaryColor,
+          contentX + 0.1 + i * (CARD_W + cardGap),
+          bodyY + 0.24,
+          cardH,
+        ),
+      );
+  }
+
+  // Non-brand section
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: contentX,
+    y: nonBrandY,
+    w: leftW,
+    h: nonBrandH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: contentX,
+    y: nonBrandY,
+    w: leftW,
+    h: 0.03,
+    fill: { color: TW_BLUE },
+    line: { type: 'none' },
+  });
+  slide.addText('Non Brand-owned', {
+    x: contentX + 0.1,
+    y: nonBrandY + 0.04,
+    w: leftW - 0.2,
+    h: 0.17,
+    fontSize: 6,
+    bold: true,
+    color: TW_BLUE,
+    fontFace: font,
+    align: 'left',
+    valign: 'middle',
+  });
+  if (data.nonBrandOwned.length === 0) {
+    slide.addText('No non-brand data', {
+      x: contentX + 0.1,
+      y: nonBrandY + 0.28,
+      w: leftW - 0.2,
+      h: nonBrandH - 0.32,
+      fontSize: 7,
+      color: mutedColor,
+      fontFace: font,
+      align: 'center',
+      valign: 'middle',
+    });
+  } else {
+    const cardH = nonBrandH - 0.28;
+    data.nonBrandOwned
+      .slice(0, 4)
+      .forEach((post, i) =>
+        drawTwCard(post, TW_BLUE, contentX + 0.1 + i * (CARD_W + cardGap), nonBrandY + 0.24, cardH),
+      );
+  }
+
+  // Analysis panel (right, full height)
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: rightX,
+    y: bodyY,
+    w: rightW,
+    h: bodyH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: rightX,
+    y: bodyY,
+    w: rightW,
+    h: 0.15,
+    fill: { color: primaryColor, transparency: 85 },
+    line: { type: 'none' },
+  });
+  slide.addText('Analysis', {
+    x: rightX + 0.08,
+    y: bodyY,
+    w: rightW - 0.16,
+    h: 0.15,
+    fontSize: 6,
+    bold: true,
+    color: primaryColor,
+    fontFace: font,
+    align: 'left',
+    valign: 'middle',
+  });
+  const insightText = data.insight
+    ? data.insight
+        .split('\n')
+        .filter(Boolean)
+        .map((l) =>
+          l
+            .replace(/\*\*(.*?)\*\*/g, '$1')
+            .replace(/^[-•]\s*/, '• ')
+            .trim(),
+        )
+        .join('\n')
+    : 'No insight generated.';
+  slide.addText(insightText, {
+    x: rightX + 0.08,
+    y: bodyY + 0.18,
+    w: rightW - 0.16,
+    h: bodyH - 0.22,
+    fontSize: 6.5,
+    color: data.insight ? textColor : mutedColor,
+    fontFace: font,
+    align: 'left',
+    valign: 'top',
+    italic: !data.insight,
+    paraSpaceAfter: 4,
+    lineSpacingMultiple: 1.2,
+    wrap: true,
+  });
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Facebook: Growth (facebook_page_26)
+// ─────────────────────────────────────────────────────────────────────────────
+interface IcFbGrowthExportData {
+  chartData: { date: string; follows: number; likes: number; engagement: number }[];
+  tableRows: {
+    month: string;
+    post_count: string;
+    fans_growth: string;
+    post_reach: string;
+    engagement: string;
+  }[];
+  insight: string;
+  currentPage: number;
+  totalPages: number;
+}
+
+export function createIcFbGrowthNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcFbGrowthExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+  drawSlideHeader(slide, pptx, tv, `${config.clientName} \u2014 Facebook Growth`, 'facebook', {
+    subtitle: `${config.period} \u00b7 Follows \u00b7 Likes \u00b7 Engagement`,
+  });
+
+  const { font, isDark, textColor, mutedColor, cardBg, borderColor, primaryColor } = tv;
+  const FB_BLUE = '2980B9'; // Follows — left axis
+  const FB_ORANGE = 'E67E22'; // Likes   — right axis
+  const FB_BAR = '3498DB'; // Engagement bar
+  const contentX = 0.3;
+  const contentW = 9.4;
+  const bodyY = 0.97;
+  const footerY = 5.15;
+  const bodyH = footerY - bodyY;
+  const gap = 0.12;
+  const insightW = contentW * 0.28;
+  const chartAreaW = contentW - insightW - gap;
+  const insightX = contentX + chartAreaW + gap;
+  const tableH = 1.1;
+  const tableGap = 0.08;
+  const chartsH = bodyH - tableH - tableGap;
+
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: contentX,
+    y: bodyY,
+    w: chartAreaW,
+    h: chartsH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: contentX,
+    y: bodyY,
+    w: chartAreaW,
+    h: 0.03,
+    fill: { color: primaryColor },
+    line: { type: 'none' },
+  });
+
+  if (data.chartData.length > 0) {
+    const monthNames = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    const labels = data.chartData.map((d) => {
+      const parts = (d.date ?? '').split('-');
+      if (parts.length >= 3) {
+        const mo = parseInt(parts[1], 10);
+        return `${monthNames[(mo - 1) % 12]}-${parts[2].slice(0, 2)}`;
+      }
+      return d.date ?? '';
+    });
+    const followsSeries = data.chartData.map((d) => d.follows ?? 0);
+    const likesSeries = data.chartData.map((d) => d.likes ?? 0);
+    const engSeries = data.chartData.map((d) => d.engagement ?? 0);
+    const symSize = labels.length > 15 ? 2 : 4;
+    const labelFreq = labels.length > 20 ? Math.ceil(labels.length / 10) : 1;
+    const axisOpts = {
+      showLegend: false,
+      showTitle: false,
+      lineSmooth: false,
+      lineSize: 1.5,
+      lineDataSymbolSize: symSize,
+      valGridLine: { style: 'dash' as const, color: isDark ? '334155' : 'E2E8F0' },
+      catGridLine: { style: 'none' as const },
+      catAxisLabelFontSize: 6,
+      valAxisLabelFontSize: 6,
+      catAxisLabelColor: mutedColor,
+      valAxisLabelColor: mutedColor,
+      catAxisLineShow: false,
+      valAxisLineShow: false,
+      catAxisLabelFrequency: String(labelFreq),
+    };
+    const labelH = 0.12;
+    const subGap = 0.04;
+    const totalUsable = chartsH - 0.08 - 3 * labelH - 2 * subGap;
+    const subH = totalUsable / 3;
+
+    const c1Y = bodyY + 0.06;
+    slide.addText('Follows', {
+      x: contentX + 0.1,
+      y: c1Y,
+      w: chartAreaW - 0.2,
+      h: labelH,
+      fontSize: 5.5,
+      bold: true,
+      color: isDark ? 'CBD5E1' : '475569',
+      fontFace: font,
+    });
+    slide.addChart(pptx.ChartType.line, [{ name: 'Follows', labels, values: followsSeries }], {
+      ...axisOpts,
+      valAxisMinVal: 0,
+      chartColors: [FB_BLUE],
+      x: contentX + 0.05,
+      y: c1Y + labelH,
+      w: chartAreaW - 0.1,
+      h: subH,
+    });
+
+    const c2Y = c1Y + labelH + subH + subGap;
+    slide.addText('Likes', {
+      x: contentX + 0.1,
+      y: c2Y,
+      w: chartAreaW - 0.2,
+      h: labelH,
+      fontSize: 5.5,
+      bold: true,
+      color: isDark ? 'CBD5E1' : '475569',
+      fontFace: font,
+    });
+    slide.addChart(pptx.ChartType.line, [{ name: 'Likes', labels, values: likesSeries }], {
+      ...axisOpts,
+      valAxisMinVal: 0,
+      chartColors: [FB_ORANGE],
+      x: contentX + 0.05,
+      y: c2Y + labelH,
+      w: chartAreaW - 0.1,
+      h: subH,
+    });
+
+    const c3Y = c2Y + labelH + subH + subGap;
+    slide.addText('Engagement', {
+      x: contentX + 0.1,
+      y: c3Y,
+      w: chartAreaW - 0.2,
+      h: labelH,
+      fontSize: 5.5,
+      bold: true,
+      color: isDark ? 'CBD5E1' : '475569',
+      fontFace: font,
+    });
+    slide.addChart(pptx.ChartType.bar, [{ name: 'Engagement', labels, values: engSeries }], {
+      ...axisOpts,
+      valAxisMinVal: 0,
+      chartColors: [FB_BAR],
+      barDir: 'col',
+      x: contentX + 0.05,
+      y: c3Y + labelH,
+      w: chartAreaW - 0.1,
+      h: subH,
+    });
+  } else {
+    slide.addText('No chart data available', {
+      x: contentX + 0.1,
+      y: bodyY + chartsH / 2 - 0.12,
+      w: chartAreaW - 0.2,
+      h: 0.25,
+      fontSize: 8,
+      color: mutedColor,
+      fontFace: font,
+      align: 'center',
+    });
+  }
+
+  // Analysis panel (right)
+  drawSlideInsight(slide, pptx, tv, {
+    x: insightX,
+    y: bodyY,
+    w: insightW,
+    h: chartsH,
+    label: 'Analysis',
+    text: data.insight || '',
+  });
+
+  // Summary table (bottom)
+  const tableY = bodyY + chartsH + tableGap;
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: contentX,
+    y: tableY,
+    w: contentW,
+    h: tableH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: contentX,
+    y: tableY,
+    w: contentW,
+    h: 0.03,
+    fill: { color: primaryColor },
+    line: { type: 'none' },
+  });
+
+  if (data.tableRows.length > 0) {
+    const colHeaders = ['Month', 'Post Count', 'Fans Growth', 'Post Reach', 'Engagement'];
+    const tableW = contentW - 0.1;
+    const colWidths = [1.68, 1.63, 1.73, 2.13, 2.13]; // sums to 9.3 = tableW
+    const rowCount = data.tableRows.length;
+    const rowH_tbl = (tableH - 0.09) / (rowCount + 1);
+    const headerRow = colHeaders.map((h, ci) => ({
+      text: h,
+      options: {
+        fontSize: 6.5,
+        bold: true,
+        color: 'FFFFFF' as string,
+        fontFace: font,
+        align: (ci === 0 ? 'left' : 'center') as 'left' | 'center',
+        fill: { color: primaryColor },
+      },
+    }));
+    const dataRows = data.tableRows.map((row, ri) => {
+      const isGap = row.month === 'Gap';
+      const vals = [row.month, row.post_count, row.fans_growth, row.post_reach, row.engagement];
+      return vals.map((cell, ci) => {
+        let cellColor = textColor;
+        if (isGap && ci > 0) {
+          const num = parseFloat((cell ?? '').replace('%', '').replace(/,/g, ''));
+          if (!isNaN(num)) cellColor = num >= 0 ? '16A34A' : 'DC2626';
+        }
+        return {
+          text: cell ?? '-',
+          options: {
+            fontSize: 6.5,
+            color: cellColor,
+            fontFace: font,
+            align: (ci === 0 ? 'left' : 'center') as 'left' | 'center',
+            bold: ci === 0 || isGap,
+            fill: { color: ri % 2 === 0 ? cardBg : isDark ? '1A2535' : 'F8FAFC' },
+          },
+        };
+      });
+    });
+    slide.addTable([headerRow, ...dataRows], {
+      x: contentX + 0.05,
+      y: tableY + 0.06,
+      w: contentW - 0.1,
+      h: tableH - 0.09,
+      colW: colWidths,
+      rowH: rowH_tbl,
+      border: { type: 'solid', color: borderColor, pt: 0.4 },
+      fontFace: font,
+    });
+  }
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ── IC Competitor Overview — native 3-table layout ────────────────────────────
+
+interface IcCompIgRow {
+  competitor: string;
+  followers_inc: number | null;
+  followers_growth: number | null;
+  ig_engagement: number | null;
+  ig_engagement_growth: number | null;
+  er_folls: number | null;
+}
+
+interface IcCompTtRow {
+  competitor: string;
+  followers_growth: number | null;
+  followers_growth_inc: number | null;
+  engagement: number | null;
+  engagement_inc: number | null;
+  avg_views: number | null;
+  avg_views_inc: number | null;
+}
+
+interface IcCompTwRow {
+  competitor: string;
+  followers_growth: number | null;
+  followers_growth_inc: number | null;
+  engagement: number | null;
+  engagement_inc: number | null;
+  er_folls: number | null;
+}
+
+interface IcCompOverviewExportData {
+  igTable: IcCompIgRow[];
+  ttTable: IcCompTtRow[];
+  twTable: IcCompTwRow[];
+  insight: string;
+  currentPage: number;
+  totalPages: number;
+}
+
+/** Format compact number (K/M) */
+function _fmtNC(v: number | null): string {
+  if (v === null || v === undefined) return '-';
+  const n = Number(v);
+  if (isNaN(n)) return '-';
+  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (Math.abs(n) >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return Math.round(n).toLocaleString();
+}
+
+/** Format growth percentage — fraction heuristic same as slide */
+function _fmtPctC(v: number | null): string {
+  if (v === null || v === undefined) return '';
+  const pct = Math.abs(v) < 2 ? v * 100 : v;
+  return `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+}
+
+/** Format ER as percentage */
+function _fmtERC(v: number | null): string {
+  if (v === null || v === undefined) return '-';
+  const n = Number(v);
+  if (isNaN(n)) return '-';
+  const pct = Math.abs(n) < 2 ? n * 100 : n;
+  return `${pct.toFixed(2)}%`;
+}
+
+type _RTP = { text: string; options: Record<string, unknown> };
+
+/** Build a richText cell with value on line 1 + coloured pct on line 2 */
+function _growthCell(
+  val: number | null,
+  pct: number | null,
+  textColor: string,
+  font: string,
+): { text: _RTP[] | string; options: { fontFace: string; align: 'center'; valign: 'middle' } } {
+  const valStr = _fmtNC(val);
+  const pctStr = _fmtPctC(pct);
+  if (!pctStr) {
+    return {
+      text: valStr,
+      options: { fontFace: font, align: 'center', valign: 'middle' },
+    };
+  }
+  const numPct = pct !== null ? (Math.abs(pct) < 2 ? pct * 100 : pct) : 0;
+  const pctColor = numPct >= 0 ? '16A34A' : 'DC2626';
+  return {
+    text: [
+      { text: valStr, options: { fontSize: 8, bold: true, color: textColor, breakLine: true } },
+      { text: pctStr, options: { fontSize: 6.5, bold: true, color: pctColor } },
+    ],
+    options: { fontFace: font, align: 'center', valign: 'middle' },
+  };
+}
+
+/**
+ * Draw one platform table card inside a slide.
+ * @param accentColor 6-char hex (no #)  e.g. 'E1306C'
+ * @param headers     column header strings
+ * @param rows        array of cell objects — each cell is { text, options } or richText
+ */
+function _drawCompTable(
+  slide: PptxGenJS.Slide,
+  pptx: PptxGenJS,
+  tv: SlideThemeVars,
+  opts: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    platformLabel: string;
+    accentColor: string;
+    headers: string[];
+    rows: ReturnType<typeof _growthCell>[][];
+  },
+) {
+  const { font, textColor, mutedColor, cardBg, borderColor, isDark } = tv;
+  const { x, y, w, h, headers, rows } = opts;
+
+  // Card background
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x,
+    y,
+    w,
+    h,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+
+  // Table inside card
+  const tblY = y + 0.04;
+  const tblH = h - 0.08;
+
+  if (rows.length === 0) {
+    slide.addText('No data available', {
+      x: x + 0.05,
+      y: tblY,
+      w: w - 0.1,
+      h: tblH,
+      fontSize: 8,
+      color: mutedColor,
+      align: 'center',
+      valign: 'middle',
+      fontFace: font,
+    });
+    return;
+  }
+
+  const colCount = headers.length;
+  const nameColW = w * 0.32;
+  const otherColW = (w - nameColW - 0.08) / (colCount - 1);
+  const colWidths = [nameColW, ...Array(colCount - 1).fill(otherColW)];
+  const rowH_each = (tblH - 0.04) / (rows.length + 1);
+
+  // Header row
+  const headerRow = headers.map((h, ci) => ({
+    text: h,
+    options: {
+      bold: true,
+      fontSize: 6.5,
+      color: mutedColor,
+      fontFace: font,
+      align: (ci === 0 ? 'left' : 'center') as 'left' | 'center',
+      fill: { color: isDark ? '1E293B' : 'F1F5F9' },
+      valign: 'middle' as const,
+    },
+  }));
+
+  // Data rows
+  const dataRows = rows.map((row, ri) =>
+    row.map((cell, ci) => {
+      const rowFill = { color: ri % 2 === 0 ? cardBg : isDark ? '1A2535' : 'F8FAFC' };
+      if (ci === 0) {
+        // Competitor name column — plain text, left-aligned
+        return {
+          text: typeof cell.text === 'string' ? cell.text : '',
+          options: {
+            fontSize: 8,
+            bold: true,
+            color: textColor,
+            fontFace: font,
+            align: 'left' as const,
+            valign: 'middle' as const,
+            fill: rowFill,
+          },
+        };
+      }
+      if (typeof cell.text === 'string') {
+        return {
+          text: cell.text,
+          options: {
+            fontSize: 8,
+            color: textColor,
+            fontFace: font,
+            align: 'center' as const,
+            valign: 'middle' as const,
+            fill: rowFill,
+          },
+        };
+      }
+      // richText cell
+      return {
+        text: (cell.text as _RTP[]).map((p) => ({ text: p.text, options: p.options })),
+        options: {
+          ...cell.options,
+          fill: rowFill,
+        },
+      };
+    }),
+  );
+
+  slide.addTable([headerRow, ...dataRows] as any, {
+    x: x + 0.04,
+    y: tblY,
+    w: w - 0.08,
+    h: tblH,
+    colW: colWidths,
+    rowH: rowH_each,
+    border: { type: 'solid', color: borderColor, pt: 0.3 },
+    fontFace: font,
+  });
+}
+
+export function createIcCompOverviewNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcCompOverviewExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+
+  const { font, primaryColor, textColor } = tv;
+
+  // ── Custom header with 3 badges ──────────────────────────────────────────
+  const { headerX, headerY, headerW, headerH } = drawSlideHeader(
+    slide,
+    pptx,
+    tv,
+    `${config.clientName} \u2014 Competitor Overview`,
+    undefined, // no single channel — we add 3 badges manually below
+    {
+      subtitle: `${config.period} \u00b7 Competitor Analysis`,
+    },
+  );
+
+  // 3 small channel badges on the far right of the header
+  const badgeSize = 0.3;
+  const badgeGap = 0.06;
+  const totalBadgesW = 3 * badgeSize + 2 * badgeGap;
+  let bx = headerX + headerW - totalBadgesW - 0.08;
+  const by = headerY + (headerH - badgeSize) / 2;
+  for (const ch of ['instagram', 'tiktok', 'twitter'] as const) {
+    const svg = getChannelBadgeSvg(ch);
+    if (svg) {
+      slide.addImage({ data: svg, x: bx, y: by, w: badgeSize, h: badgeSize });
+    }
+    bx += badgeSize + badgeGap;
+  }
+
+  // ── 3 Side-by-side table cards ──────────────────────────────────────────
+  const contentX = 0.3;
+  const contentW = 9.4;
+  const bodyY = headerY + headerH + 0.1; // just below header
+  const footerTop = 5.15;
+  const insightH = 1.4;
+  const insightGap = 0.1;
+  const tablesH = footerTop - bodyY - insightH - insightGap - 0.05;
+
+  const tblGap = 0.1;
+  const tblW = (contentW - 2 * tblGap) / 3;
+
+  // IG table
+  const igRows = data.igTable.map((r) => [
+    {
+      text: r.competitor,
+      options: { fontFace: font, align: 'left' as const, valign: 'middle' as const },
+    },
+    _growthCell(r.followers_inc, r.followers_growth, textColor, font),
+    _growthCell(r.ig_engagement, r.ig_engagement_growth, textColor, font),
+    {
+      text: _fmtERC(r.er_folls),
+      options: { fontFace: font, align: 'center' as const, valign: 'middle' as const },
+    },
+  ]);
+
+  _drawCompTable(slide, pptx, tv, {
+    x: contentX,
+    y: bodyY,
+    w: tblW,
+    h: tablesH,
+    platformLabel: 'Instagram',
+    accentColor: 'E1306C',
+    headers: ['Competitor', 'Followers Growth', 'Engagement', 'ER Folls'],
+    rows: igRows as any,
+  });
+
+  // TikTok table
+  const ttRows = data.ttTable.map((r) => [
+    {
+      text: r.competitor,
+      options: { fontFace: font, align: 'left' as const, valign: 'middle' as const },
+    },
+    _growthCell(r.followers_growth, r.followers_growth_inc, textColor, font),
+    _growthCell(r.engagement, r.engagement_inc, textColor, font),
+    _growthCell(r.avg_views, r.avg_views_inc, textColor, font),
+  ]);
+
+  _drawCompTable(slide, pptx, tv, {
+    x: contentX + tblW + tblGap,
+    y: bodyY,
+    w: tblW,
+    h: tablesH,
+    platformLabel: 'TikTok',
+    accentColor: 'EE1D52',
+    headers: ['Competitor', 'Followers Growth', 'Engagement', 'Avg Views'],
+    rows: ttRows as any,
+  });
+
+  // Twitter table
+  const twRows = data.twTable.map((r) => [
+    {
+      text: r.competitor,
+      options: { fontFace: font, align: 'left' as const, valign: 'middle' as const },
+    },
+    _growthCell(r.followers_growth, r.followers_growth_inc, textColor, font),
+    _growthCell(r.engagement, r.engagement_inc, textColor, font),
+    {
+      text: _fmtERC(r.er_folls),
+      options: { fontFace: font, align: 'center' as const, valign: 'middle' as const },
+    },
+  ]);
+
+  _drawCompTable(slide, pptx, tv, {
+    x: contentX + 2 * (tblW + tblGap),
+    y: bodyY,
+    w: tblW,
+    h: tablesH,
+    platformLabel: 'Twitter / X',
+    accentColor: '1DA1F2',
+    headers: ['Competitor', 'Followers Growth', 'Engagement', 'ER Folls'],
+    rows: twRows as any,
+  });
+
+  // ── Insight box ─────────────────────────────────────────────────────────
+  const insightY = bodyY + tablesH + insightGap;
+  drawSlideInsight(slide, pptx, tv, {
+    x: contentX,
+    y: insightY,
+    w: contentW,
+    h: insightH,
+    label: 'Analysis & Insights',
+    text: data.insight || '',
+  });
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ── IC Competitor Detail — native 3-channel post-card layout ─────────────────
+
+interface IcCompDetailPost {
+  ig_engagement?: number | null;
+  permalink?: string | null;
+  play_count?: number | null;
+  engagement_b?: number | null;
+  url?: string | null;
+  image_url?: string | null;
+}
+
+interface IcCompDetailExportData {
+  competitor: string;
+  igPosts: { ig_engagement: number | null; permalink: string | null; image_url?: string | null }[];
+  ttPosts: { play_count: number | null; engagement_b: number | null; url: string | null; image_url?: string | null }[];
+  twPosts: { engagement_b: number | null; url: string | null; image_url?: string | null }[];
+  narrative: string;
+  currentPage: number;
+  totalPages: number;
+}
+
+export function createIcCompDetailNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcCompDetailExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+
+  const { font, primaryColor, textColor, mutedColor, cardBg, borderColor, isDark } = tv;
+
+  // ── Header ─────────────────────────────────────────────────────────────────
+  const { headerX, headerY, headerW, headerH } = drawSlideHeader(
+    slide,
+    pptx,
+    tv,
+    data.competitor || 'Competitor Detail',
+    undefined,
+    {
+      subtitle: `${config.period} \u00b7 Top 3 Posts per Channel`,
+    },
+  );
+
+  // 3 channel badges on right side of header
+  const badgeSize = 0.3;
+  const badgeGap = 0.06;
+  let bx = headerX + headerW - 3 * badgeSize - 2 * badgeGap - 0.08;
+  const by = headerY + (headerH - badgeSize) / 2;
+  for (const ch of ['instagram', 'tiktok', 'twitter'] as const) {
+    const svg = getChannelBadgeSvg(ch);
+    if (svg) slide.addImage({ data: svg, x: bx, y: by, w: badgeSize, h: badgeSize });
+    bx += badgeSize + badgeGap;
+  }
+
+  // ── Body layout ────────────────────────────────────────────────────────────
+  const contentX = 0.3;
+  const contentW = 9.4;
+  const bodyY = headerY + headerH + 0.08;
+  const footerTop = 5.15;
+  const bodyH = footerTop - bodyY - 0.05;
+
+  const narrativeW = 2.1;
+  const narrativeGap = 0.12;
+  const postsX = contentX;
+  const postsW = contentW - narrativeW - narrativeGap;
+  const narrativeX = contentX + postsW + narrativeGap;
+
+  const rowCount = 3;
+  const rowGap = 0.06;
+  const rowH = (bodyH - (rowCount - 1) * rowGap) / rowCount;
+  const labelH = 0.22;
+  const cardGap = 0.05;
+  const cardAreaH = rowH - labelH - 0.03;
+  const cardW = (postsW - 2 * cardGap) / 3;
+  const imgW = cardW * 0.45;
+  const metricsW = cardW - imgW;
+
+  type ChannelCfg = {
+    label: string;
+    color: string;
+    posts: IcCompDetailPost[];
+    getMetrics: (p: IcCompDetailPost) => { label: string; value: string }[];
+    getUrl: (p: IcCompDetailPost) => string | null | undefined;
+  };
+
+  const channelCfg: ChannelCfg[] = [
+    {
+      label: 'Instagram',
+      color: 'E1306C',
+      posts: data.igPosts as IcCompDetailPost[],
+      getMetrics: (p) => [{ label: 'Engagement', value: _fmtNC(p.ig_engagement ?? null) }],
+      getUrl: (p) => p.permalink,
+    },
+    {
+      label: 'TikTok',
+      color: 'EE1D52',
+      posts: data.ttPosts as IcCompDetailPost[],
+      getMetrics: (p) => [
+        { label: 'Views', value: _fmtNC(p.play_count ?? null) },
+        { label: 'Engagement', value: _fmtNC(p.engagement_b ?? null) },
+      ],
+      getUrl: (p) => p.url,
+    },
+    {
+      label: 'Twitter / X',
+      color: '1DA1F2',
+      posts: data.twPosts as IcCompDetailPost[],
+      getMetrics: (p) => [{ label: 'Engagement', value: _fmtNC(p.engagement_b ?? null) }],
+      getUrl: (p) => p.url,
+    },
+  ];
+
+  channelCfg.forEach(({ label, color, posts, getMetrics, getUrl }, rowIdx) => {
+    const rowY = bodyY + rowIdx * (rowH + rowGap);
+
+    // Coloured channel label band
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: postsX,
+      y: rowY,
+      w: postsW,
+      h: labelH,
+      fill: { color },
+      line: { type: 'none' },
+      rectRadius: 0.04,
+    });
+    slide.addText(label, {
+      x: postsX,
+      y: rowY,
+      w: postsW,
+      h: labelH,
+      fontSize: 8,
+      bold: true,
+      color: 'FFFFFF',
+      align: 'center',
+      valign: 'middle',
+      fontFace: font,
+    });
+
+    const cardY = rowY + labelH + 0.03;
+
+    for (let cardIdx = 0; cardIdx < 3; cardIdx++) {
+      const cardX = postsX + cardIdx * (cardW + cardGap);
+      const post = posts[cardIdx] || null;
+
+      // --- Empty placeholder ---
+      if (!post) {
+        slide.addShape(pptx.ShapeType.roundRect, {
+          x: cardX,
+          y: cardY,
+          w: cardW,
+          h: cardAreaH,
+          fill: { color: isDark ? '1A2535' : 'FAFAFA' },
+          line: { color: isDark ? '334155' : 'E2E8F0', width: 0.5, dashType: 'dash' },
+          rectRadius: 0.05,
+        });
+        continue;
+      }
+
+      // --- Card background ---
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: cardX,
+        y: cardY,
+        w: cardW,
+        h: cardAreaH,
+        fill: { color: cardBg },
+        line: { color: borderColor, width: 0.5 },
+        rectRadius: 0.05,
+        shadow: { type: 'outer', blur: 2, offset: 1, color: '000000', opacity: 0.05 },
+      });
+
+      // --- Image area (left ~45%) ---
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: cardX,
+        y: cardY,
+        w: imgW,
+        h: cardAreaH,
+        fill: { color: isDark ? '334155' : 'CBD5E1' },
+        line: { type: 'none' },
+        rectRadius: 0.05,
+      });
+      slide.addShape(pptx.ShapeType.rect, {
+        x: cardX + imgW - 0.05,
+        y: cardY,
+        w: 0.06,
+        h: cardAreaH,
+        fill: { color: isDark ? '334155' : 'CBD5E1' },
+        line: { type: 'none' },
+      });
+      if (post.image_url) {
+        slide.addImage({
+          data: post.image_url,
+          x: cardX,
+          y: cardY,
+          w: imgW,
+          h: cardAreaH,
+          sizing: { type: 'cover', w: imgW, h: cardAreaH },
+        });
+      }
+      // Rank badge
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: cardX + 0.04,
+        y: cardY + 0.04,
+        w: 0.32,
+        h: 0.17,
+        fill: { color },
+        line: { type: 'none' },
+        rectRadius: 0.04,
+      });
+      slide.addText(`#${cardIdx + 1}`, {
+        x: cardX + 0.04,
+        y: cardY + 0.04,
+        w: 0.32,
+        h: 0.17,
+        fontSize: 7,
+        bold: true,
+        color: 'FFFFFF',
+        align: 'center',
+        valign: 'middle',
+        fontFace: font,
+        wrap: false,
+      });
+
+      // --- Metrics (right half) ---
+      const mx = cardX + imgW + 0.05;
+      const mw = metricsW - 0.08;
+      const metrics = getMetrics(post);
+      const metricRowH = 0.15;
+      const metricGap = 0.04;
+      const startY = cardY + 0.07;
+
+      metrics.forEach(({ label: mLabel, value }, mi) => {
+        const my = startY + mi * (metricRowH * 2 + metricGap);
+        slide.addText(mLabel, {
+          x: mx,
+          y: my,
+          w: mw,
+          h: metricRowH,
+          fontSize: 5.5,
+          color: mutedColor,
+          fontFace: font,
+          align: 'left',
+        });
+        slide.addText(value, {
+          x: mx,
+          y: my + metricRowH,
+          w: mw,
+          h: metricRowH,
+          fontSize: 7.5,
+          bold: true,
+          color: textColor,
+          fontFace: font,
+          align: 'left',
+        });
+      });
+
+      // Link row at bottom of metrics
+      const urlStr = getUrl(post);
+      const linkY = cardY + cardAreaH - 0.19;
+      slide.addShape(pptx.ShapeType.line, {
+        x: mx,
+        y: linkY,
+        w: mw,
+        h: 0,
+        line: { color: borderColor, width: 0.3 },
+      });
+      slide.addText(urlStr ? 'View Post \u2197' : '—', {
+        x: mx,
+        y: linkY + 0.04,
+        w: mw,
+        h: 0.13,
+        fontSize: 5.5,
+        bold: !!urlStr,
+        color: urlStr ? '3B82F6' : mutedColor,
+        fontFace: font,
+        align: 'left',
+      });
+    }
+  });
+
+  // ── Narrative panel (right) ────────────────────────────────────────────────
+  // Card
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: narrativeX,
+    y: bodyY,
+    w: narrativeW,
+    h: bodyH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  // Header band
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: narrativeX,
+    y: bodyY,
+    w: narrativeW,
+    h: 0.3,
+    fill: { color: isDark ? '1E293B' : 'F1F5F9' },
+    line: { type: 'none' },
+    rectRadius: 0.08,
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: narrativeX,
+    y: bodyY + 0.15,
+    w: narrativeW,
+    h: 0.16,
+    fill: { color: isDark ? '1E293B' : 'F1F5F9' },
+    line: { type: 'none' },
+  });
+  slide.addShape(pptx.ShapeType.line, {
+    x: narrativeX,
+    y: bodyY + 0.3,
+    w: narrativeW,
+    h: 0,
+    line: { color: borderColor, width: 0.5 },
+  });
+  slide.addText('NARRATIVE', {
+    x: narrativeX + 0.1,
+    y: bodyY + 0.06,
+    w: narrativeW - 0.2,
+    h: 0.2,
+    fontSize: 7,
+    bold: true,
+    color: mutedColor,
+    fontFace: font,
+    align: 'left',
+    valign: 'middle',
+  });
+  // Text content
+  slide.addText(data.narrative || (isDark ? '' : 'Add analysis here\u2026'), {
+    x: narrativeX + 0.1,
+    y: bodyY + 0.35,
+    w: narrativeW - 0.2,
+    h: bodyH - 0.42,
+    fontSize: 7.5,
+    color: data.narrative ? textColor : mutedColor,
+    fontFace: font,
+    valign: 'top',
+    wrap: true,
+  });
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+// ── Chapter 7: Competitor Instagram Focus ──────────────────────────────────
+interface IcCompIgFocusExportData {
+  competitor: string;
+  top3: Array<{
+    ig_engagement: number | null;
+    likes: number | null;
+    comments: number | null;
+    er_folls: number | null;
+    permalink: string | null;
+    image_url?: string | null;
+  }>;
+  growthSeries: Array<{ date: string; daily_foll_growth: number | null }>;
+  mainBrandRow: {
+    brand: string;
+    followers_growth: number | null;
+    followers_growth_gap: number | null;
+    post_count: number | null;
+    post_count_growth: number | null;
+    total_engagement: number | null;
+    total_engagement_gap: number | null;
+    avg_er_folls_b: number | null;
+  } | null;
+  compRow: {
+    brand: string;
+    ig_followers_increase: number | null;
+    ig_followers_growth: number | null;
+    post_count: number | null;
+    post_count_growth: number | null;
+    ig_engagement_b: number | null;
+    ig_engagement_b_growth: number | null;
+    er_folls: number | null;
+  } | null;
+  narrative: string;
+  currentPage: number;
+  totalPages: number;
+}
+
+export function createIcCompIgFocusNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcCompIgFocusExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+
+  const { font, primaryColor, textColor, mutedColor, cardBg, borderColor, isDark } = tv;
+
+  // ── Header ────────────────────────────────────────────────────────────────
+  const { headerX, headerY, headerW, headerH } = drawSlideHeader(
+    slide,
+    pptx,
+    tv,
+    `${data.competitor || 'Competitor'} — Instagram Focus`,
+    'instagram',
+    { subtitle: `${config.period} · Top Posts · Followers Growth · Performance` },
+  );
+
+  // ── Body layout ────────────────────────────────────────────────────────────
+  const contentX = 0.3;
+  const contentW = 9.4;
+  const bodyY = headerY + headerH + 0.08;
+  const footerTop = 5.15;
+  const bodyH = footerTop - bodyY - 0.05;
+
+  const narrativeW = 2.0;
+  const narrativeGap = 0.1;
+  const leftW = contentW - narrativeW - narrativeGap;
+  const leftX = contentX;
+  const narrativeX = contentX + leftW + narrativeGap;
+
+  const secGap = 0.06;
+  const postsH = 1.5; // 0.2" band + 1.3" cards
+  const tableH = 0.95;
+  const chartH = bodyH - postsH - tableH - 2 * secGap;
+
+  let curY = bodyY;
+
+  // ── TOP 3 POST CARDS ───────────────────────────────────────────────────────
+  // Pink IG band
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: leftX,
+    y: curY,
+    w: leftW,
+    h: 0.2,
+    fill: { color: 'E1306C' },
+    line: { type: 'none' },
+    rectRadius: 0.04,
+  });
+  slide.addText('Instagram · Top 3 Posts', {
+    x: leftX,
+    y: curY,
+    w: leftW,
+    h: 0.2,
+    fontSize: 7,
+    bold: true,
+    color: 'FFFFFF',
+    align: 'center',
+    valign: 'middle',
+    fontFace: font,
+  });
+  curY += 0.2;
+
+  const cardAreaH = postsH - 0.2;
+  const cardGap = 0.05;
+  const cardW = (leftW - 2 * cardGap) / 3;
+  const imgW = cardW * 0.44;
+
+  for (let ci = 0; ci < 3; ci++) {
+    const cardX = leftX + ci * (cardW + cardGap);
+    const post = data.top3[ci] || null;
+
+    // Card background
+    slide.addShape(pptx.ShapeType.roundRect, {
+      x: cardX,
+      y: curY,
+      w: cardW,
+      h: cardAreaH,
+      fill: { color: post ? cardBg : isDark ? '1A2535' : 'FAFAFA' },
+      line: {
+        color: post ? borderColor : isDark ? '334155' : 'E2E8F0',
+        width: 0.5,
+        dashType: post ? 'solid' : 'dash',
+      },
+      rectRadius: 0.05,
+    });
+
+    if (post) {
+      // Image area (left 44%)
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: cardX,
+        y: curY,
+        w: imgW,
+        h: cardAreaH,
+        fill: { color: isDark ? '334155' : 'CBD5E1' },
+        line: { type: 'none' },
+        rectRadius: 0.05,
+      });
+      slide.addShape(pptx.ShapeType.rect, {
+        x: cardX + imgW - 0.05,
+        y: curY,
+        w: 0.06,
+        h: cardAreaH,
+        fill: { color: isDark ? '334155' : 'CBD5E1' },
+        line: { type: 'none' },
+      });
+      if (post.image_url) {
+        slide.addImage({
+          data: post.image_url,
+          x: cardX,
+          y: curY,
+          w: imgW,
+          h: cardAreaH,
+          sizing: { type: 'cover', w: imgW, h: cardAreaH },
+        });
+      }
+
+      // Rank badge
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x: cardX + 0.04,
+        y: curY + 0.04,
+        w: 0.32,
+        h: 0.17,
+        fill: { color: 'E1306C' },
+        line: { type: 'none' },
+        rectRadius: 0.04,
+      });
+      slide.addText(`#${ci + 1}`, {
+        x: cardX + 0.04,
+        y: curY + 0.04,
+        w: 0.32,
+        h: 0.17,
+        fontSize: 7,
+        bold: true,
+        color: 'FFFFFF',
+        align: 'center',
+        valign: 'middle',
+        fontFace: font,
+        wrap: false,
+      });
+
+      // Metrics (right side)
+      const mx = cardX + imgW + 0.05;
+      const mw = cardW - imgW - 0.08;
+      const mRowH = 0.12;
+      const mGap = 0.02;
+      const metrics = [
+        { label: 'Engagement', value: _fmtNC(post.ig_engagement) },
+        { label: 'Likes', value: _fmtNC(post.likes) },
+        { label: 'Comments', value: _fmtNC(post.comments) },
+        { label: 'ER Folls', value: _fmtERC(post.er_folls) },
+      ];
+      let my = curY + 0.05;
+      for (const { label, value } of metrics) {
+        slide.addText(label, {
+          x: mx,
+          y: my,
+          w: mw,
+          h: mRowH,
+          fontSize: 5,
+          color: mutedColor,
+          fontFace: font,
+          align: 'left',
+        });
+        slide.addText(value, {
+          x: mx,
+          y: my + mRowH,
+          w: mw,
+          h: mRowH,
+          fontSize: 6.5,
+          bold: true,
+          color: textColor,
+          fontFace: font,
+          align: 'left',
+        });
+        my += mRowH * 2 + mGap;
+      }
+
+      // View Post link at bottom
+      const linkY = curY + cardAreaH - 0.18;
+      slide.addShape(pptx.ShapeType.line, {
+        x: mx,
+        y: linkY,
+        w: mw,
+        h: 0,
+        line: { color: borderColor, width: 0.3 },
+      });
+      slide.addText(post.permalink ? 'View Post \u2197' : '\u2014', {
+        x: mx,
+        y: linkY + 0.03,
+        w: mw,
+        h: 0.13,
+        fontSize: 5,
+        bold: !!post.permalink,
+        color: post.permalink ? '3B82F6' : mutedColor,
+        fontFace: font,
+        align: 'left',
+      });
+    }
+  }
+  curY += cardAreaH + secGap;
+
+  // ── FOLLOWERS GROWTH CHART ────────────────────────────────────────────────
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: leftX,
+    y: curY,
+    w: leftW,
+    h: chartH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.5 },
+    rectRadius: 0.06,
+  });
+  slide.addText('Daily Followers Growth', {
+    x: leftX + 0.1,
+    y: curY + 0.05,
+    w: leftW - 0.2,
+    h: 0.18,
+    fontSize: 6.5,
+    bold: true,
+    color: mutedColor,
+    fontFace: font,
+  });
+
+  const growthLabels = data.growthSeries.map((g) => {
+    const d = new Date(g.date);
+    return `${d.toLocaleString('default', { month: 'short' })} ${d.getDate()}`;
+  });
+  const growthValues = data.growthSeries.map((g) => g.daily_foll_growth ?? 0);
+
+  if (growthLabels.length > 0) {
+    slide.addChart(
+      pptx.ChartType.line,
+      [{ name: 'Foll. Growth', labels: growthLabels, values: growthValues }],
+      {
+        x: leftX + 0.05,
+        y: curY + 0.23,
+        w: leftW - 0.1,
+        h: chartH - 0.28,
+        chartColors: ['E1306C'],
+        showLegend: false,
+        showTitle: false,
+        valGridLine: { style: 'dash', color: isDark ? '334155' : 'E5E7EB' },
+        catGridLine: { style: 'none' },
+        catAxisLabelFontSize: 7,
+        valAxisLabelFontSize: 7,
+        catAxisLabelColor: mutedColor,
+        valAxisLabelColor: mutedColor,
+        lineDataSymbol: 'none',
+        lineSize: 1.5,
+      } as Record<string, unknown>,
+    );
+  } else {
+    slide.addText('No growth data available', {
+      x: leftX + 0.1,
+      y: curY + 0.23,
+      w: leftW - 0.2,
+      h: chartH - 0.28,
+      fontSize: 8,
+      color: mutedColor,
+      fontFace: font,
+      align: 'center',
+      valign: 'middle',
+    });
+  }
+  curY += chartH + secGap;
+
+  // ── COMPARISON TABLE ──────────────────────────────────────────────────────
+  const tblHeaders = ['Brand', 'Flw. Growth', 'Post Count', 'Engagement', 'ER Folls'];
+
+  const nameCell = (name: string) => ({
+    text: name,
+    options: { fontFace: font, align: 'center' as const, valign: 'middle' as const },
+  });
+  const erCell = (v: number | null) => ({
+    text: _fmtERC(v),
+    options: { fontFace: font, align: 'center' as const, valign: 'middle' as const },
+  });
+
+  const tblRows: ReturnType<typeof _growthCell>[][] = [];
+  if (data.mainBrandRow) {
+    const r = data.mainBrandRow;
+    tblRows.push([
+      nameCell(r.brand || config.clientName || '\u2014'),
+      _growthCell(r.followers_growth, r.followers_growth_gap, textColor, font),
+      _growthCell(r.post_count, r.post_count_growth, textColor, font),
+      _growthCell(r.total_engagement, r.total_engagement_gap, textColor, font),
+      erCell(r.avg_er_folls_b),
+    ]);
+  }
+  if (data.compRow) {
+    const r = data.compRow;
+    tblRows.push([
+      nameCell(r.brand || data.competitor || '\u2014'),
+      _growthCell(r.ig_followers_increase, r.ig_followers_growth, textColor, font),
+      _growthCell(r.post_count, r.post_count_growth, textColor, font),
+      _growthCell(r.ig_engagement_b, r.ig_engagement_b_growth, textColor, font),
+      erCell(r.er_folls),
+    ]);
+  }
+
+  _drawCompTable(slide, pptx, tv, {
+    x: leftX,
+    y: curY,
+    w: leftW,
+    h: tableH,
+    platformLabel: 'Instagram',
+    accentColor: 'E1306C',
+    headers: tblHeaders,
+    rows: tblRows,
+  });
+
+  // ── NARRATIVE PANEL ───────────────────────────────────────────────────────
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: narrativeX,
+    y: bodyY,
+    w: narrativeW,
+    h: bodyH,
+    fill: { color: cardBg },
+    line: { color: borderColor, width: 0.75 },
+    rectRadius: 0.08,
+    shadow: { type: 'outer', blur: 4, offset: 1, color: '000000', opacity: 0.05 },
+  });
+  // Header band
+  slide.addShape(pptx.ShapeType.roundRect, {
+    x: narrativeX,
+    y: bodyY,
+    w: narrativeW,
+    h: 0.3,
+    fill: { color: isDark ? '1E293B' : 'F1F5F9' },
+    line: { type: 'none' },
+    rectRadius: 0.08,
+  });
+  slide.addShape(pptx.ShapeType.rect, {
+    x: narrativeX,
+    y: bodyY + 0.15,
+    w: narrativeW,
+    h: 0.16,
+    fill: { color: isDark ? '1E293B' : 'F1F5F9' },
+    line: { type: 'none' },
+  });
+  slide.addShape(pptx.ShapeType.line, {
+    x: narrativeX,
+    y: bodyY + 0.3,
+    w: narrativeW,
+    h: 0,
+    line: { color: borderColor, width: 0.5 },
+  });
+  slide.addText(data.competitor ? `${data.competitor} INSIGHT` : 'INSIGHT', {
+    x: narrativeX + 0.1,
+    y: bodyY + 0.06,
+    w: narrativeW - 0.2,
+    h: 0.2,
+    fontSize: 7,
+    bold: true,
+    color: primaryColor,
+    fontFace: font,
+    align: 'left',
+    valign: 'middle',
+  });
+  slide.addText(data.narrative || 'Add Instagram analysis here\u2026', {
+    x: narrativeX + 0.1,
+    y: bodyY + 0.35,
+    w: narrativeW - 0.2,
+    h: bodyH - 0.42,
+    fontSize: 7.5,
+    color: data.narrative ? textColor : mutedColor,
+    fontFace: font,
+    valign: 'top',
+    wrap: true,
+  });
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
+}
+
+interface IcIgCpReachExportData {
+  aon: boolean;
+  currMonth: string;
+  prevMonth: string;
+  reachCurr: IcCpPillarRow[];
+  reachPrev: IcCpPillarRow[];
+  erCurr: IcCpPillarRow[];
+  erPrev: IcCpPillarRow[];
+  deltaReach: IcCpDeltaRow[];
+  deltaEr: IcCpDeltaRow[];
+  currentPage: number;
+  totalPages: number;
+}
+
+export function createIcIgCpReachNative(
+  pptx: PptxGenJS,
+  config: ReportConfig,
+  data: IcIgCpReachExportData,
+) {
+  const slide = pptx.addSlide();
+  const tv = getSlideThemeVars(config);
+  drawSlideBackground(slide, pptx, config, tv);
+  drawSlideDecorations(slide, pptx, tv);
+
+  const aonLabel = data.aon ? 'AON (Brand-Owned)' : 'Non-AON (Client)';
+  drawSlideHeader(
+    slide,
+    pptx,
+    tv,
+    `${config.clientName} \u2014 Content Pillar Reach \u2014 ${aonLabel}`,
+    'instagram',
+    { subtitle: `${config.period} \u00b7 Avg Reach & Avg ER Reach per Pillar` },
+  );
+
+  const { primaryColor, font } = tv;
+  const prevLabel = monthLabelPptx(data.prevMonth);
+  const currLabel = monthLabelPptx(data.currMonth);
+
+  const reachRows = buildAlignedRows(data.reachCurr, data.reachPrev);
+  const erRows = buildAlignedRows(data.erCurr, data.erPrev);
+  const allPillars = reachRows.map((r: any) => r.pillar);
+
+  const bodyY = 0.97;
+  const bodyH = 5.15 - bodyY;
+  const rowH = (bodyH - 0.1) / 2;
+  const chartX = 0.3;
+  const chartW = 7.0;
+  const deltaX = 7.4;
+  const deltaW = 2.25;
+
+  drawCpBarChart(
+    slide,
+    tv,
+    reachRows,
+    prevLabel,
+    currLabel,
+    'Average Reach',
+    chartX,
+    bodyY,
+    chartW,
+    rowH,
+  );
+  drawDeltaPanel(
+    slide,
+    tv,
+    'Avg Reach \u0394',
+    allPillars,
+    data.deltaReach,
+    deltaX,
+    bodyY,
+    deltaW,
+    rowH,
+  );
+
+  drawCpBarChart(
+    slide,
+    tv,
+    erRows,
+    prevLabel,
+    currLabel,
+    'Average ER Reach',
+    chartX,
+    bodyY + rowH + 0.1,
+    chartW,
+    rowH,
+  );
+  drawDeltaPanel(
+    slide,
+    tv,
+    'Avg ER Reach \u0394',
+    allPillars,
+    data.deltaEr,
+    deltaX,
+    bodyY + rowH + 0.1,
+    deltaW,
+    rowH,
+  );
+
+  drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
 }
