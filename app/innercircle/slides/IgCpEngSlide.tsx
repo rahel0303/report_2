@@ -52,9 +52,18 @@ interface Props {
 }
 
 const MONTH_ID: Record<string, string> = {
-  '01': 'Jan', '02': 'Feb', '03': 'Mar', '04': 'Apr',
-  '05': 'Mei', '06': 'Jun', '07': 'Jul', '08': 'Agu',
-  '09': 'Sep', '10': 'Okt', '11': 'Nov', '12': 'Des',
+  '01': 'Jan',
+  '02': 'Feb',
+  '03': 'Mar',
+  '04': 'Apr',
+  '05': 'Mei',
+  '06': 'Jun',
+  '07': 'Jul',
+  '08': 'Agu',
+  '09': 'Sep',
+  '10': 'Okt',
+  '11': 'Nov',
+  '12': 'Des',
 };
 
 function monthLabel(mmYyyy: string) {
@@ -102,7 +111,7 @@ const PillarBarChart: React.FC<{
 
   const CustomLabel = (props: any) => {
     const { x, y, width, height, value } = props;
-    if (!value || value === 0) return null;
+    if (!value || Number(value) < 1) return null;
     const label = isER ? `${Number(value).toFixed(2)}%` : fmtNum(Number(value));
     return (
       <text
@@ -119,18 +128,14 @@ const PillarBarChart: React.FC<{
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart
-        layout="vertical"
-        data={data}
-        margin={{ top: 2, right: 36, left: 0, bottom: 2 }}
-      >
+      <BarChart layout="vertical" data={data} margin={{ top: 2, right: 36, left: 0, bottom: 2 }}>
         <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke={gridColor} />
         <XAxis
           type="number"
           tick={{ fontSize: 6, fill: textColor }}
           tickLine={false}
           axisLine={{ stroke: gridColor }}
-          tickFormatter={(v) => v === 0 ? '' : (isER ? `${v.toFixed(1)}%` : fmtNum(v))}
+          tickFormatter={(v) => (v === 0 ? '' : isER ? `${v.toFixed(1)}%` : fmtNum(v))}
         />
         <YAxis
           type="category"
@@ -139,9 +144,7 @@ const PillarBarChart: React.FC<{
           tickLine={false}
           axisLine={false}
           width={58}
-          tickFormatter={(v: string) =>
-            v.length > 14 ? v.substring(0, 13) + '…' : v
-          }
+          tickFormatter={(v: string) => (v.length > 14 ? v.substring(0, 13) + '…' : v)}
         />
         <Tooltip
           formatter={(v: number | undefined) => {
@@ -209,7 +212,13 @@ const DeltaPanel: React.FC<{
               <span
                 className="text-[6.5px] font-bold"
                 style={{
-                  color: positive ? '#16a34a' : negative ? '#dc2626' : isDark ? '#475569' : '#94a3b8',
+                  color: positive
+                    ? '#16a34a'
+                    : negative
+                      ? '#dc2626'
+                      : isDark
+                        ? '#475569'
+                        : '#94a3b8',
                 }}
               >
                 {label}
@@ -268,8 +277,11 @@ export const IgCpEngSlide: React.FC<Props> = ({
         className="w-full h-full flex items-center justify-center"
         style={{ fontFamily: config.font?.name || 'Inter', background: theme.pageBg }}
       >
-        <p className={`text-3xl font-bold text-center px-4 ${isDark ? 'text-white' : 'text-slate-800'}`}>
-          {config.clientName || '—'}<br />
+        <p
+          className={`text-3xl font-bold text-center px-4 ${isDark ? 'text-white' : 'text-slate-800'}`}
+        >
+          {config.clientName || '—'}
+          <br />
           <span className="text-xl font-medium" style={{ color: colorPrimary }}>
             {slideTitle}
           </span>
@@ -279,12 +291,8 @@ export const IgCpEngSlide: React.FC<Props> = ({
   }
 
   // Build chart data
-  const engData = data
-    ? buildChartData(data.engCurr, data.engPrev)
-    : [];
-  const postData = data
-    ? buildChartData(data.postCurr, data.postPrev)
-    : [];
+  const engData = data ? buildChartData(data.engCurr, data.engPrev) : [];
+  const postData = data ? buildChartData(data.postCurr, data.postPrev) : [];
 
   const allPillars = data
     ? Array.from(
@@ -411,10 +419,7 @@ export const IgCpEngSlide: React.FC<Props> = ({
                     </div>
                   </div>
                   {/* Divider */}
-                  <div
-                    className="w-px self-stretch my-2"
-                    style={{ background: theme.border }}
-                  />
+                  <div className="w-px self-stretch my-2" style={{ background: theme.border }} />
                   {/* Curr month */}
                   <div className="flex-1 flex flex-col min-h-0">
                     <span
@@ -467,10 +472,7 @@ export const IgCpEngSlide: React.FC<Props> = ({
                       />
                     </div>
                   </div>
-                  <div
-                    className="w-px self-stretch my-2"
-                    style={{ background: theme.border }}
-                  />
+                  <div className="w-px self-stretch my-2" style={{ background: theme.border }} />
                   <div className="flex-1 flex flex-col min-h-0">
                     <span
                       className="text-[6.5px] font-semibold text-center pb-0.5 shrink-0"

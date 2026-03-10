@@ -562,44 +562,60 @@ export const TtGrowthSlide: React.FC<Props> = ({
                           </tr>
                         </thead>
                         <tbody>
-                          {tableRows.map((row, ri) => (
-                            <tr
-                              key={ri}
-                              style={{
-                                backgroundColor:
-                                  ri % 2 === 0
-                                    ? 'transparent'
-                                    : isDark
-                                      ? 'rgba(255,255,255,0.03)'
-                                      : '#f8fafc',
-                              }}
-                            >
-                              {[
-                                row.month,
-                                row.post_count,
-                                row.profile_views,
-                                row.followers_growth,
-                                row.reach,
-                                row.views,
-                                row.engagement,
-                                row.avg_watch_time,
-                              ].map((cell, ci) => (
-                                <td
-                                  key={ci}
-                                  className="px-2 py-2.5 whitespace-nowrap border-b"
-                                  style={{
-                                    borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9',
-                                    color: isDark ? '#e2e8f0' : '#1e293b',
-                                    fontWeight: ci === 0 ? 600 : 500,
-                                    fontSize: 13,
-                                    textAlign: ci === 0 ? 'left' : 'center',
-                                  }}
-                                >
-                                  {cell}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
+                          {tableRows.map((row, ri) => {
+                            const isGap = row.month?.toLowerCase() === 'gap';
+                            return (
+                              <tr
+                                key={ri}
+                                style={{
+                                  backgroundColor: isGap
+                                    ? isDark
+                                      ? 'rgba(255,255,255,0.06)'
+                                      : '#f1f5f9'
+                                    : ri % 2 === 0
+                                      ? 'transparent'
+                                      : isDark
+                                        ? 'rgba(255,255,255,0.03)'
+                                        : '#f8fafc',
+                                }}
+                              >
+                                {[
+                                  row.month,
+                                  row.post_count,
+                                  row.profile_views,
+                                  row.followers_growth,
+                                  row.reach,
+                                  row.views,
+                                  row.engagement,
+                                  row.avg_watch_time,
+                                ].map((cell, ci) => {
+                                  let cellColor = isDark ? '#e2e8f0' : '#1e293b';
+                                  if (isGap && ci > 0) {
+                                    if (cell === '-' || cell == null)
+                                      cellColor = isDark ? '#64748b' : '#94a3b8';
+                                    else if ((cell as string).startsWith('-'))
+                                      cellColor = '#ef4444';
+                                    else cellColor = '#10b981';
+                                  }
+                                  return (
+                                    <td
+                                      key={ci}
+                                      className="px-2 py-2.5 whitespace-nowrap border-b"
+                                      style={{
+                                        borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9',
+                                        color: cellColor,
+                                        fontWeight: isGap || ci === 0 ? 600 : 500,
+                                        fontSize: 13,
+                                        textAlign: ci === 0 ? 'left' : 'center',
+                                      }}
+                                    >
+                                      {cell}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     ) : (

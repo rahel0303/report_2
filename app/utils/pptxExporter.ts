@@ -6656,7 +6656,10 @@ export function createIcTtBestLeastNative(
       const metrics = [
         { label: 'Views', val: fmtNative(post.views) },
         { label: 'Engagement', val: fmtNative(post.engagement) },
-        { label: 'VR Rate', val: post.vr_rate != null ? `${Number(post.vr_rate).toFixed(2)}%` : '-' },
+        {
+          label: 'VR Rate',
+          val: post.vr_rate != null ? `${Number(post.vr_rate).toFixed(2)}%` : '-',
+        },
       ];
       const metAreaY = cardsY + 0.26;
       const metAreaH = cardsH - 0.26 - (post.url ? 0.18 : 0.05);
@@ -6928,13 +6931,19 @@ export function createIcTtContentPillarNative(
         {
           label: 'Date',
           val: post.post_date
-            ? new Date(post.post_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+            ? new Date(post.post_date).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+              })
             : '-',
         },
         { label: 'VR', val: post.vr_rate != null ? `${Number(post.vr_rate).toFixed(1)}%` : '-' },
         { label: 'Views', val: fmtNative(post.views) },
         { label: 'Eng', val: fmtNative(post.engagement) },
-        { label: 'Avg WT', val: post.avg_watch_time != null ? `${Number(post.avg_watch_time).toFixed(1)}s` : '-' },
+        {
+          label: 'Avg WT',
+          val: post.avg_watch_time != null ? `${Number(post.avg_watch_time).toFixed(1)}s` : '-',
+        },
       ];
       const metAreaY = cardsY + 0.24;
       const metAreaH = cardH - 0.24 - (post.url ? 0.16 : 0.04);
@@ -7169,9 +7178,9 @@ function drawCpBarChart(
   const labels = rows.map((r: any) =>
     r.pillar.length > 14 ? r.pillar.substring(0, 13) + '...' : r.pillar,
   );
-  // Replace 0 with null → no bar rendered, no data label rendered
-  const prevVals = rows.map((r: any) => (r.prevVal === 0 ? null : r.prevVal)) as any[];
-  const currVals = rows.map((r: any) => (r.currVal === 0 ? null : r.currVal)) as any[];
+  // Replace 0 or near-zero (<1) with null → no bar rendered, no data label rendered
+  const prevVals = rows.map((r: any) => (!r.prevVal || r.prevVal < 1 ? null : r.prevVal)) as any[];
+  const currVals = rows.map((r: any) => (!r.currVal || r.currVal < 1 ? null : r.currVal)) as any[];
 
   // Layout: two charts side by side, matching preview layout
   const pad = 0.06;
@@ -7224,7 +7233,7 @@ function drawCpBarChart(
     showValue: true,
     dataLabelFontSize: 6.5,
     dataLabelColor: isDark ? 'FFFFFF' : '374151',
-    dataLabelFormatCode: '#,##0.##',
+    dataLabelFormatCode: '#,##0.##;-#,##0.##;""',
     catAxisLabelFontSize: 5.5,
     catAxisLabelColor: mutedColor,
     valAxisLabelFontSize: 5.5,
@@ -7232,6 +7241,8 @@ function drawCpBarChart(
     valLabelFormatCode: '#,##0;-#,##0;""',
     valAxisLineShow: false,
     catAxisLineShow: false,
+    valGridLine: { style: 'none' as const },
+    catGridLine: { style: 'none' as const },
     showTitle: false,
   } as any;
 
@@ -7752,7 +7763,10 @@ export function createIcTwBestLeastNative(
       const cx = contentX + pi * (cardW + cardGap);
       // Card bg
       slide.addShape(pptx.ShapeType.roundRect, {
-        x: cx, y: cardsY, w: cardW, h: cardsH,
+        x: cx,
+        y: cardsY,
+        w: cardW,
+        h: cardsH,
         fill: { color: cardBg },
         line: { color: borderColor, width: 0.5 },
         rectRadius: 0.05,
@@ -7763,20 +7777,35 @@ export function createIcTwBestLeastNative(
         slide.addImage({ data: post.image_url, x: cx, y: cardsY, w: cardW, h: imgH });
       } else {
         slide.addShape(pptx.ShapeType.rect, {
-          x: cx, y: cardsY, w: cardW, h: imgH,
+          x: cx,
+          y: cardsY,
+          w: cardW,
+          h: imgH,
           fill: { color: isDark ? '1E293B' : 'E2E8F0' },
           line: { type: 'none' },
         });
       }
       // Rank badge
       slide.addShape(pptx.ShapeType.roundRect, {
-        x: cx + 0.04, y: cardsY + 0.04, w: 0.36, h: 0.16,
-        fill: { color }, line: { type: 'none' }, rectRadius: 0.04,
+        x: cx + 0.04,
+        y: cardsY + 0.04,
+        w: 0.36,
+        h: 0.16,
+        fill: { color },
+        line: { type: 'none' },
+        rectRadius: 0.04,
       });
       slide.addText(`#${pi + 1}`, {
-        x: cx + 0.04, y: cardsY + 0.04, w: 0.36, h: 0.16,
-        fontSize: 6.5, bold: true, color: 'FFFFFF', fontFace: font,
-        align: 'center', valign: 'middle',
+        x: cx + 0.04,
+        y: cardsY + 0.04,
+        w: 0.36,
+        h: 0.16,
+        fontSize: 6.5,
+        bold: true,
+        color: 'FFFFFF',
+        fontFace: font,
+        align: 'center',
+        valign: 'middle',
       });
       // Metrics — bottom
       const metrics = [
@@ -7789,27 +7818,57 @@ export function createIcTwBestLeastNative(
       metrics.forEach((m, mi) => {
         const my = cardsY + imgH + mi * mRowH;
         slide.addText(m.label, {
-          x: cx + 0.04, y: my, w: cardW * 0.46, h: mRowH,
-          fontSize: 4.5, color: mutedColor, fontFace: font, align: 'left', valign: 'middle',
+          x: cx + 0.04,
+          y: my,
+          w: cardW * 0.46,
+          h: mRowH,
+          fontSize: 4.5,
+          color: mutedColor,
+          fontFace: font,
+          align: 'left',
+          valign: 'middle',
         });
         slide.addText(m.val, {
-          x: cx + cardW * 0.46, y: my, w: cardW * 0.54 - 0.04, h: mRowH,
-          fontSize: 5, bold: true, color: textColor, fontFace: font, align: 'right', valign: 'middle',
+          x: cx + cardW * 0.46,
+          y: my,
+          w: cardW * 0.54 - 0.04,
+          h: mRowH,
+          fontSize: 5,
+          bold: true,
+          color: textColor,
+          fontFace: font,
+          align: 'right',
+          valign: 'middle',
         });
       });
       let off = metrics.length;
       if (post.date) {
         slide.addText(String(post.date).slice(0, 10), {
-          x: cx + 0.04, y: cardsY + imgH + off * mRowH, w: cardW - 0.08, h: mRowH * 0.5,
-          fontSize: 4, color: mutedColor, fontFace: font, align: 'left', valign: 'middle',
+          x: cx + 0.04,
+          y: cardsY + imgH + off * mRowH,
+          w: cardW - 0.08,
+          h: mRowH * 0.5,
+          fontSize: 4,
+          color: mutedColor,
+          fontFace: font,
+          align: 'left',
+          valign: 'middle',
         });
         off += 0.5;
       }
       if (post.url) {
         slide.addText('View tweet', {
-          x: cx + 0.04, y: cardsY + imgH + off * mRowH, w: cardW - 0.08, h: mRowH,
-          fontSize: 4.5, bold: true, color: '3B82F6', fontFace: font,
-          align: 'right', valign: 'middle', hyperlink: { url: post.url },
+          x: cx + 0.04,
+          y: cardsY + imgH + off * mRowH,
+          w: cardW - 0.08,
+          h: mRowH,
+          fontSize: 4.5,
+          bold: true,
+          color: '3B82F6',
+          fontFace: font,
+          align: 'right',
+          valign: 'middle',
+          hyperlink: { url: post.url },
         });
       }
     });
@@ -8883,7 +8942,12 @@ interface IcCompDetailPost {
 interface IcCompDetailExportData {
   competitor: string;
   igPosts: { ig_engagement: number | null; permalink: string | null; image_url?: string | null }[];
-  ttPosts: { play_count: number | null; engagement_b: number | null; url: string | null; image_url?: string | null }[];
+  ttPosts: {
+    play_count: number | null;
+    engagement_b: number | null;
+    url: string | null;
+    image_url?: string | null;
+  }[];
   twPosts: { engagement_b: number | null; url: string | null; image_url?: string | null }[];
   narrative: string;
   currentPage: number;
