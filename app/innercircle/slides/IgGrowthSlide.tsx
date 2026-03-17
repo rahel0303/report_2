@@ -11,13 +11,14 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { BarChart2, Sparkles, Loader2, Send } from 'lucide-react';
+import { BarChart2, Sparkles, Loader2, Wand2, Check, X } from 'lucide-react';
 import { ReportConfig } from '@/app/types';
 import { SlideFooter } from '@/app/components/ui/SlideFooter';
 import { ChannelBadge } from '@/app/components/ui';
 import { generateLayoutTheme } from '@/app/utils/themeStyles';
 import { generateGeminiContent } from '@/app/utils/api';
 import { renderTextWithHighlights } from '@/app/utils/helpers';
+import { buildIgGrowthPrompt, REFINE_SYSTEM_PROMPT } from '@/app/lib/insightPrompts';
 
 // instagram_page_8.py — Combined chart (Followers Growth + Profile Reach dual-axis) + Analysis + Table
 
@@ -65,6 +66,8 @@ interface Props {
   isThumbnail?: boolean;
   currentPage?: number;
   totalPages?: number;
+  savedInsight?: string;
+  onInsightChange?: (value: string) => void;
 }
 
 function shortDate(d: string): string {
@@ -85,6 +88,8 @@ export const IgGrowthSlide: React.FC<Props> = ({
   isThumbnail = false,
   currentPage,
   totalPages,
+  savedInsight,
+  onInsightChange,
 }) => {
   const [lineData, setLineData] = useState<LinePoint[]>([]);
   const [tableRows, setTableRows] = useState<TableRow[]>([]);
@@ -92,12 +97,18 @@ export const IgGrowthSlide: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
 
   // Insight state
-  const [insight, setInsight] = useState('');
+  const [insight, setInsight] = useState(savedInsight || '');
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
+
+  // AI generate state
   const [isGenerating, setIsGenerating] = useState(false);
-  const [showAiInput, setShowAiInput] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState('');
+
+  // Refine state
+  const [showRefineInput, setShowRefineInput] = useState(false);
+  const [refinePrompt, setRefinePrompt] = useState('');
+  const [refinePreview, setRefinePreview] = useState<string | null>(null);
+  const [isRefining, setIsRefining] = useState(false);
 
   useEffect(() => {
     if (!config.clientName || isThumbnail) return;
@@ -144,31 +155,50 @@ export const IgGrowthSlide: React.FC<Props> = ({
     [mappedLine],
   );
 
-  const handleGenerateAI = async (e?: React.FormEvent) => {
-    e?.preventDefault();
+
+  const handleGenerate = async () => {
     setIsGenerating(true);
-    setShowAiInput(false);
     try {
-      const ctx = tableRows
-        .map(
-          (r) =>
-            `${r.month}: Profile Reach=${r.profileReach}, Profile Visit=${r.profileVisit}, Growth=${r.growth}, Reach=${r.reach}, Engagement=${r.engagement}, ER Reach=${r.erReach}%`,
-        )
-        .join('\n');
-      const prompt = `Analyze the Instagram growth data for ${config.clientName} (${config.period}):\n${ctx}\n${aiPrompt ? `Focus: ${aiPrompt}` : ''}`;
-      const text = await generateGeminiContent(prompt);
+      const { prompt, systemPrompt } = buildIgGrowthPrompt(config.clientName, config.period, tableRows);
+      const text = await generateGeminiContent(prompt, systemPrompt);
       setInsight(text);
+      onInsightChange?.(text);
     } catch {
-      setInsight('Failed to generate insight. Please try again.');
+      // silently fail
     } finally {
       setIsGenerating(false);
-      setAiPrompt('');
     }
   };
 
   const handleSaveEdit = () => {
     setInsight(editValue);
+    onInsightChange?.(editValue);
     setIsEditing(false);
+  };
+
+  const handleRefine = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    setIsRefining(true);
+    setShowRefineInput(false);
+    try {
+      const charLimit = insight.length;
+      const systemPrompt = REFINE_SYSTEM_PROMPT;
+      const prompt = `Original text (${charLimit} chars):\n\n${insight}${refinePrompt ? `\n\nAdditional instruction: ${refinePrompt}` : ''}`;
+      const text = await generateGeminiContent(prompt, systemPrompt);
+      setRefinePreview(text.trim());
+    } catch {
+      // silently fail — keep current insight
+    } finally {
+      setIsRefining(false);
+      setRefinePrompt('');
+    }
+  };
+
+  const handleApplyRefine = () => {
+    if (!refinePreview) return;
+    setInsight(refinePreview);
+    onInsightChange?.(refinePreview);
+    setRefinePreview(null);
   };
 
   // Thumbnail
@@ -403,82 +433,98 @@ export const IgGrowthSlide: React.FC<Props> = ({
                     </span>
                   </div>
                   <div className="flex items-center gap-1">
-                    {insight && !isEditing && (
-                      <button
-                        onClick={() => {
-                          setEditValue(insight);
-                          setIsEditing(true);
-                          setShowAiInput(false);
-                        }}
-                        className={`text-[9px] font-medium px-2 py-0.5 rounded-full border transition-all ${
-                          isDark
-                            ? 'text-slate-400 border-white/10 hover:bg-white/10'
-                            : 'text-slate-500 border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        Edit
-                      </button>
+                    {insight && !isEditing && !refinePreview && (
+                      <>
+                        <button
+                          onClick={() => {
+                            setShowRefineInput(!showRefineInput);
+                          }}
+                          className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium border transition-all ${
+                            showRefineInput
+                              ? isDark
+                                ? 'bg-amber-500/30 text-amber-300 border-amber-500/50'
+                                : 'bg-amber-100 text-amber-700 border-amber-200'
+                              : isDark
+                                ? 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10'
+                                : 'bg-amber-50 text-amber-600 border-amber-100 hover:bg-amber-100'
+                          }`}
+                        >
+                          <Wand2 size={9} />
+                          <span>{showRefineInput ? 'Close' : 'Refine'}</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditValue(insight);
+                            setIsEditing(true);
+                            setShowRefineInput(false);
+                          }}
+                          className={`text-[9px] font-medium px-2 py-0.5 rounded-full border transition-all ${
+                            isDark
+                              ? 'text-slate-400 border-white/10 hover:bg-white/10'
+                              : 'text-slate-500 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          Edit
+                        </button>
+                      </>
                     )}
-                    <button
-                      onClick={() => {
-                        setShowAiInput(!showAiInput);
-                        setIsEditing(false);
-                      }}
-                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium border transition-all ${
-                        showAiInput
-                          ? isDark
-                            ? 'bg-indigo-500/30 text-indigo-300 border-indigo-500/50'
-                            : 'bg-indigo-100 text-indigo-700 border-indigo-200'
-                          : isDark
+                    {!isEditing && !refinePreview && (
+                      <button
+                        onClick={handleGenerate}
+                        disabled={isGenerating}
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium border transition-all disabled:opacity-50 ${
+                          isDark
                             ? 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10'
                             : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100'
-                      }`}
-                    >
-                      <Sparkles size={9} />
-                      <span>{showAiInput ? 'Close' : 'AI'}</span>
-                    </button>
+                        }`}
+                      >
+                        {isGenerating ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />}
+                        <span>AI</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* AI input row */}
-                {showAiInput && (
+                {/* Refine input row */}
+                {showRefineInput && (
                   <div
                     className="px-3 py-2 border-b shrink-0"
                     style={{
-                      backgroundColor: isDark ? 'rgba(99,102,241,0.1)' : '#eef2ff',
-                      borderColor: isDark ? 'rgba(99,102,241,0.3)' : '#c7d2fe',
+                      backgroundColor: isDark ? 'rgba(245,158,11,0.1)' : '#fffbeb',
+                      borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a',
                     }}
                   >
-                    <form onSubmit={handleGenerateAI} className="flex gap-2">
+                    <form onSubmit={handleRefine} className="flex gap-2">
                       <input
                         type="text"
-                        value={aiPrompt}
-                        onChange={(e) => setAiPrompt(e.target.value)}
-                        placeholder="Optional focus…"
+                        value={refinePrompt}
+                        onChange={(e) => setRefinePrompt(e.target.value)}
+                        placeholder="Instruksi tambahan (opsional)…"
                         maxLength={150}
                         className={`flex-1 text-[10px] px-2 py-1 rounded border focus:outline-none ${
                           isDark
-                            ? 'bg-white/10 border-white/10 text-white'
-                            : 'bg-white border-indigo-200 text-slate-700'
+                            ? 'bg-white/10 border-white/10 text-white placeholder:text-white/30'
+                            : 'bg-white border-amber-200 text-slate-700'
                         }`}
                       />
                       <button
                         type="submit"
-                        disabled={isGenerating}
-                        className="bg-indigo-600 text-white px-2.5 rounded hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center"
+                        disabled={isRefining}
+                        className="bg-amber-500 text-white px-2.5 rounded hover:bg-amber-600 disabled:opacity-50 flex items-center justify-center"
                       >
-                        {isGenerating ? (
+                        {isRefining ? (
                           <Loader2 size={10} className="animate-spin" />
                         ) : (
-                          <Send size={10} />
+                          <Wand2 size={10} />
                         )}
                       </button>
                     </form>
                   </div>
                 )}
 
+
                 {/* Content */}
-                <div className="flex-1 overflow-auto p-3 min-h-0">
+                <div className="flex-1 min-h-0 p-3 flex flex-col overflow-hidden">
                   {isGenerating ? (
                     <div className="flex flex-col items-center justify-center h-full gap-2 opacity-70">
                       <Sparkles size={20} className="text-indigo-500 animate-spin" />
@@ -486,19 +532,58 @@ export const IgGrowthSlide: React.FC<Props> = ({
                         Analyzing…
                       </span>
                     </div>
+                  ) : isRefining ? (
+                    <div className="flex flex-col items-center justify-center h-full gap-2 opacity-70">
+                      <Wand2 size={20} className="text-amber-500 animate-spin" />
+                      <span className="text-[10px] font-medium animate-pulse text-amber-500">
+                        Refining…
+                      </span>
+                    </div>
+                  ) : refinePreview ? (
+                    <div className="h-full flex flex-col gap-2 overflow-hidden">
+                      <div
+                        className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded w-fit shrink-0 ${
+                          isDark ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-100 text-amber-700'
+                        }`}
+                      >
+                        Preview
+                      </div>
+                      <div
+                        className={`flex-1 text-[11px] font-medium overflow-hidden ${
+                          isDark ? 'text-slate-200' : 'text-slate-700'
+                        }`}
+                      >
+                        {renderTextWithHighlights(refinePreview, isDark, colorPrimary)}
+                      </div>
+                      <div className="flex justify-end gap-2 shrink-0">
+                        <button
+                          onClick={() => setRefinePreview(null)}
+                          className={`flex items-center gap-1 text-[9px] px-3 py-1 rounded border ${
+                            isDark ? 'border-white/20 text-slate-400' : 'border-slate-200 text-slate-500'
+                          }`}
+                        >
+                          <X size={9} /> Discard
+                        </button>
+                        <button
+                          onClick={handleApplyRefine}
+                          className="flex items-center gap-1 text-[9px] px-3 py-1 rounded bg-amber-500 text-white hover:bg-amber-600"
+                        >
+                          <Check size={9} /> Apply
+                        </button>
+                      </div>
+                    </div>
                   ) : isEditing ? (
-                    <div className="h-full flex flex-col gap-2">
+                    <div className="h-full flex flex-col gap-2 overflow-hidden">
                       <textarea
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
-                        maxLength={500}
                         autoFocus
-                        className={`flex-1 text-[11px] leading-relaxed p-2 rounded border focus:outline-none resize-none w-full ${
+                        className={`flex-1 text-[11px] leading-snug p-2 rounded border focus:outline-none resize-none w-full ${
                           isDark
-                            ? 'bg-white/10 border-white/10 text-white'
+                            ? 'bg-white/10 border-white/10 text-white placeholder:text-white/30'
                             : 'bg-slate-50 border-slate-200 text-slate-700'
                         }`}
-                        placeholder="Type your analysis here…"
+                        placeholder={"Tulis analisis...\n\nFormat bullet: mulai baris dengan '- '\nFormat paragraf: tulis bebas"}
                       />
                       <div className="flex justify-end gap-2 shrink-0">
                         <button
@@ -518,8 +603,8 @@ export const IgGrowthSlide: React.FC<Props> = ({
                   ) : insight ? (
                     <div
                       data-ic-insight
-                      className={`text-[11px] leading-relaxed font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
-                      style={{ cursor: 'pointer' }}
+                      data-insight-raw={insight}
+                      className={`h-full text-[11px] font-medium overflow-hidden cursor-pointer ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
                       onClick={() => {
                         setEditValue(insight);
                         setIsEditing(true);

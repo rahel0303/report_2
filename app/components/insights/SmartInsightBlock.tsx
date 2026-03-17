@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Swal from 'sweetalert2';
 import { PenTool, X, Check, Edit3, Sparkles, Loader2 } from 'lucide-react';
 import { SmartInsightBlockProps } from '@/app/types';
 import { InsightMethodSelectionModal, AiPromptModal } from '@/app/components/ui';
@@ -162,7 +163,7 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
       }
     } catch (error) {
       console.error('AI generation failed:', error);
-      alert('Failed to generate insights. Please try manual entry.');
+      Swal.fire({ icon: 'error', title: 'Failed', text: 'Failed to generate insights. Please try manual entry.', confirmButtonColor: '#1e293b' });
     } finally {
       setIsGenerating(false);
     }
@@ -267,11 +268,11 @@ export const SmartInsightBlock: React.FC<SmartInsightBlockProps> = ({
         if (onSave) onSave(refinedText);
       } else {
         // If no bullet points found, show error
-        alert('Failed to generate proper format. Please try again.');
+        Swal.fire({ icon: 'error', title: 'Failed', text: 'Failed to generate proper format. Please try again.', confirmButtonColor: '#1e293b' });
       }
     } catch (error) {
       console.error('AI refinement failed:', error);
-      alert('Failed to refine content. Please try manual editing.');
+      Swal.fire({ icon: 'error', title: 'Failed', text: 'Failed to refine content. Please try manual editing.', confirmButtonColor: '#1e293b' });
     } finally {
       setIsGenerating(false);
     }

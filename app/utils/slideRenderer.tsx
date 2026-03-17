@@ -239,6 +239,8 @@ export const renderSlide = (
           isThumbnail={mode === 'thumbnail'}
           currentPage={currentPage}
           totalPages={totalPages}
+          savedInsight={slide.content?.insight}
+          onInsightChange={(val) => onUpdate?.('insight', val)}
           key={`ic-ig-growth-${config.clientName}-${config.period}`}
         />
       );
@@ -285,6 +287,8 @@ export const renderSlide = (
           isThumbnail={mode === 'thumbnail'}
           currentPage={currentPage}
           totalPages={totalPages}
+          savedInsight={slide.content?.insight}
+          onInsightChange={(val) => onUpdate?.('insight', val)}
           key={`ic-tt-growth-${config.clientName}-${config.period}`}
         />
       );
@@ -379,6 +383,8 @@ export const renderSlide = (
           isThumbnail={mode === 'thumbnail'}
           currentPage={currentPage}
           totalPages={totalPages}
+          savedInsight={slide.content?.insight}
+          onInsightChange={(val) => onUpdate?.('insight', val)}
           key={`ic-tw-growth-${config.clientName}-${config.period}`}
         />
       );
@@ -412,6 +418,8 @@ export const renderSlide = (
           isThumbnail={mode === 'thumbnail'}
           currentPage={currentPage}
           totalPages={totalPages}
+          savedInsight={slide.content?.insight}
+          onInsightChange={(val) => onUpdate?.('insight', val)}
           key={`ic-fb-growth-${config.clientName}-${config.period}`}
         />
       );

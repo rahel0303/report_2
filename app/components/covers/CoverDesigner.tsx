@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import Swal from 'sweetalert2';
 import { useDropzone } from 'react-dropzone';
 import { Sun, Moon } from 'lucide-react';
 import {
@@ -127,7 +128,13 @@ function getAutoFontColor(templateId: number | null, primaryColor?: string): str
   // Always dark bg → always white text
   if (templateId === 1 || templateId === 4) return '#ffffff';
   // Always light/white bg → always dark text (2=white card, 5/7/8/9=white or #fafafa)
-  if (templateId === 2 || templateId === 5 || templateId === 7 || templateId === 8 || templateId === 9)
+  if (
+    templateId === 2 ||
+    templateId === 5 ||
+    templateId === 7 ||
+    templateId === 8 ||
+    templateId === 9
+  )
     return '#111111';
   // Templates 3 & 6: gradient built entirely from primaryColor
   // → if primary is light the gradient will be light too, so infer from luminance
@@ -193,7 +200,12 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
         });
       } catch (error) {
         console.error('Color extraction failed:', error);
-        alert('Failed to extract colors from logo. Please try another image.');
+        Swal.fire({
+          icon: 'error',
+          title: 'Failed',
+          text: 'Failed to extract colors from logo. Please try another image.',
+          confirmButtonColor: '#1e293b',
+        });
       } finally {
         setLoading(false);
       }
@@ -267,10 +279,14 @@ export const CoverDesigner: React.FC<CoverDesignerProps> = ({
         contentMode,
         fontColor,
       );
-      // Show success message
-      alert(
-        'Cover design applied successfully! 🎉\n\nYou can now see your custom cover in the preview.',
-      );
+      Swal.fire({
+        icon: 'success',
+        title: 'Cover Applied!',
+        text: 'Your custom cover design has been applied.',
+        confirmButtonColor: '#1e293b',
+        timer: 1800,
+        showConfirmButton: false,
+      });
     }
   };
 

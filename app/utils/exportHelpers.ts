@@ -191,12 +191,17 @@ export const handleDownload = async (
   config: ReportConfig,
   setIsExporting: (val: boolean) => void,
   setShowExportToast: (val: boolean) => void,
+  onProgress?: (current: number, total: number, title: string) => void,
+  onComplete?: () => void,
+  onBlob?: (blob: Blob, slideCount: number) => void,
 ) => {
   setIsExporting(true);
+  document.body.style.overflow = 'hidden';
 
   try {
     if (format === 'pdf') {
-      alert('PDF export coming soon. Please use PowerPoint export for now.');
+      const Swal = (await import('sweetalert2')).default;
+      Swal.fire({ icon: 'info', title: 'Coming Soon', text: 'PDF export is coming soon. Please use PowerPoint export for now.', confirmButtonColor: '#1e293b' });
       setIsExporting(false);
       return;
     } else if (format === 'pptx') {
@@ -213,6 +218,7 @@ export const handleDownload = async (
       for (let i = 0; i < slides.length; i++) {
         const slide = slides[i];
         console.log(`📸 Capturing slide ${i + 1}/${slides.length}: ${slide.title}`);
+        onProgress?.(i + 1, slides.length, slide.title);
 
         // Cover slides: screenshot background only + native editable text
         if (slide.type === 'cover') {
@@ -1064,7 +1070,10 @@ export const handleDownload = async (
                 }
 
                 const insightEl = exportDiv.querySelector('[data-ic-insight]');
-                const insightText = insightEl?.textContent?.trim() || '';
+                const insightText =
+                  insightEl?.getAttribute('data-insight-raw')?.trim() ||
+                  insightEl?.textContent?.trim() ||
+                  '';
 
                 const { createIcAllOverviewNative } = await import('./pptxExporter');
                 createIcAllOverviewNative(pptx, config, {
@@ -1201,7 +1210,10 @@ export const handleDownload = async (
                 }
 
                 const insightEl = exportDiv.querySelector('[data-ic-insight]');
-                const insightText = insightEl?.textContent?.trim() || '';
+                const insightText =
+                  insightEl?.getAttribute('data-insight-raw')?.trim() ||
+                  insightEl?.textContent?.trim() ||
+                  '';
 
                 const { createIcIgGrowthNative } = await import('./pptxExporter');
                 createIcIgGrowthNative(pptx, config, {
@@ -1936,20 +1948,19 @@ export const handleDownload = async (
       document.body.removeChild(anchor);
       URL.revokeObjectURL(dlUrl);
 
+      // Pass blob to caller for Drive upload
+      onBlob?.(finalBlob, slides.length);
+
       console.log('🎉 Export completed with screenshots!');
-      alert(
-        `✓ Successfully exported: ${fileName}\n\n📸 All slides captured as high-quality images!`,
-      );
     }
 
     setIsExporting(false);
-    setShowExportToast(true);
-    setTimeout(() => setShowExportToast(false), 3000);
+    document.body.style.overflow = '';
+    onComplete?.();
   } catch (error) {
     console.error('Export error:', error);
     setIsExporting(false);
-    alert(
-      `Export failed: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`,
-    );
+    document.body.style.overflow = '';
+    onComplete?.();
   }
 };

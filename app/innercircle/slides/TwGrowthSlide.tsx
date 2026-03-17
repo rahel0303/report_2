@@ -49,6 +49,8 @@ interface Props {
   isThumbnail?: boolean;
   currentPage?: number;
   totalPages?: number;
+  savedInsight?: string;
+  onInsightChange?: (value: string) => void;
 }
 
 function shortDate(d: string): string {
@@ -71,13 +73,15 @@ export const TwGrowthSlide: React.FC<Props> = ({
   isThumbnail = false,
   currentPage,
   totalPages,
+  savedInsight,
+  onInsightChange,
 }) => {
   const [chartData, setChartData] = useState<DailyPoint[]>([]);
   const [tableRows, setTableRows] = useState<TableRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [insight, setInsight] = useState('');
+  const [insight, setInsight] = useState(savedInsight || '');
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -130,6 +134,7 @@ export const TwGrowthSlide: React.FC<Props> = ({
         `Analyze Twitter/X growth for ${config.clientName} (${config.period}):\n${ctx}\n${aiPrompt ? `Focus: ${aiPrompt}` : ''}\nWrite 2-3 SHORT bullet points (start each with -). Use **bold** for key numbers.`,
       );
       setInsight(text);
+      onInsightChange?.(text);
     } catch {
       setInsight('Failed to generate insight.');
     } finally {
@@ -458,6 +463,7 @@ export const TwGrowthSlide: React.FC<Props> = ({
                         <button
                           onClick={() => {
                             setInsight(editValue);
+                            onInsightChange?.(editValue);
                             setIsEditing(false);
                           }}
                           className="text-[9px] px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700"

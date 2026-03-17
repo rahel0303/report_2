@@ -40,22 +40,24 @@ export const LAYOUT_TEMPLATES: Template[] = [
   },
 ];
 
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
 export const getPeriodOptions = (type: 'Monthly' | 'Quarterly'): string[] => {
-  const year = new Date().getFullYear();
-  if (type === 'Monthly')
-    return [
-      `January ${year}`,
-      `February ${year}`,
-      `March ${year}`,
-      `April ${year}`,
-      `May ${year}`,
-      `June ${year}`,
-      `July ${year}`,
-      `August ${year}`,
-      `September ${year}`,
-      `October ${year}`,
-      `November ${year}`,
-      `December ${year}`,
-    ];
-  return [`Q1 ${year}`, `Q2 ${year}`, `Q3 ${year}`, `Q4 ${year}`];
+  const now = new Date();
+  if (type === 'Monthly') {
+    // Tampilkan 3 bulan terakhir (tidak termasuk bulan ini)
+    return [1, 2, 3].reverse().map((i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+    });
+  }
+  const year = now.getFullYear();
+  const prevYear = year - 1;
+  return [
+    `Q1 ${year}`, `Q2 ${year}`, `Q3 ${year}`, `Q4 ${year}`,
+    `Q1 ${prevYear}`, `Q2 ${prevYear}`, `Q3 ${prevYear}`, `Q4 ${prevYear}`,
+  ];
 };

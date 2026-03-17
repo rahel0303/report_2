@@ -20,15 +20,23 @@ export const getDefaultSlides = (): Slide[] => [
   { id: 1, type: 'cover', title: 'Report Cover', content: {} },
 ];
 
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function getLastMonth(): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 1);
+  return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
 export const getDefaultConfig = (): ReportConfig => ({
   reportTitle: 'Social Media Report',
   reportDetails: 'Monthly Performance & Strategy',
   preparedBy: 'Sekata Data Team',
   reportType: 'Monthly',
-  period: 'January 2026',
+  period: getLastMonth(),
   theme: themesData[0],
   font: fontsData[0],
-  clientName: '',
+  clientName: 'BNI',
   selectedCompetitors: [],
   coverDesign: undefined,
 });

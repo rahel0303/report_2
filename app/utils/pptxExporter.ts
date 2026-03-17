@@ -348,6 +348,56 @@ function drawSlideHeader(
 }
 
 /** Draw insight card with decorative circle, label, separator, and text */
+/** Parse markdown-like insight text into PptxGenJS rich text runs.
+ *  Supports: `- bullet` lines and `**bold**` inline markers.
+ */
+function parseInsightRichText(
+  text: string,
+  tv: SlideThemeVars,
+  fontSize: number,
+  fontFace: string,
+): PptxGenJS.TextProps[] {
+  const bodyColor = tv.isDark ? 'CBD5E1' : '475569';
+  const lines = text.split('\n').filter((l) => l.trim() !== '');
+  const runs: PptxGenJS.TextProps[] = [];
+
+  lines.forEach((line, lineIdx) => {
+    const isBullet = /^[-•]\s/.test(line.trim());
+    const content = isBullet ? line.trim().replace(/^[-•]\s*/, '') : line;
+    const segments = content.split(/(\*\*.*?\*\*)/g);
+    const isLastLine = lineIdx === lines.length - 1;
+
+    // Prepend bullet character as a plain text run (most reliable across PPT renderers)
+    if (isBullet) {
+      runs.push({
+        text: '• ',
+        options: { fontSize, fontFace, color: tv.primaryColor, bold: false },
+      });
+    }
+
+    segments.forEach((seg, segIdx) => {
+      const isBoldSeg = seg.startsWith('**') && seg.endsWith('**');
+      const segText = isBoldSeg ? seg.slice(2, -2) : seg;
+      const isLastSeg = segIdx === segments.length - 1;
+
+      const runOpts: PptxGenJS.TextPropsOptions = {
+        fontSize,
+        fontFace,
+        color: isBoldSeg ? tv.primaryColor : bodyColor,
+        bold: isBoldSeg,
+      };
+
+      if (isLastSeg && !isLastLine) {
+        runOpts.breakLine = true;
+      }
+
+      runs.push({ text: segText, options: runOpts });
+    });
+  });
+
+  return runs;
+}
+
 function drawSlideInsight(
   slide: PptxGenJS.Slide,
   pptx: PptxGenJS,
@@ -359,6 +409,7 @@ function drawSlideInsight(
     h: number;
     label: string;
     text: string;
+    fontSize?: number;
   },
 ) {
   // Card background
@@ -414,12 +465,17 @@ function drawSlideInsight(
 
   // Content text
   if (opts.text) {
-    slide.addText(opts.text, {
+    const fs = opts.fontSize ?? 9;
+    const hasFormatting = /\*\*|(?:^|\n)[-•]\s/.test(opts.text);
+    const textPayload = hasFormatting
+      ? parseInsightRichText(opts.text, tv, fs, tv.font)
+      : opts.text;
+    slide.addText(textPayload as any, {
       x: opts.x + 0.15,
       y: opts.y + 0.42,
       w: opts.w - 0.3,
       h: opts.h - 0.55,
-      fontSize: 9,
+      fontSize: fs,
       color: tv.isDark ? 'CBD5E1' : '475569',
       align: 'left',
       valign: 'top',
@@ -4846,7 +4902,7 @@ export function createIcIgGrowthNative(
   const rowX = 0.3;
   const rowY = 0.97;
   const rowW = 9.4;
-  const rowH = 2.9; // taller chart area
+  const rowH = 2.5;
   const gap = 0.12;
   const chartW = Math.round(rowW * 0.63 * 100) / 100;
   const analysisX = rowX + chartW + gap;
@@ -4962,11 +5018,12 @@ export function createIcIgGrowthNative(
     h: rowH,
     label: 'Analysis',
     text: data.insightText,
+    fontSize: 7,
   });
 
   // ── Full-width Table ──────────────────────────────────────────────────────
   const tblY = rowY + rowH + 0.1;
-  const tblH = 5.1 - tblY - 0.05;
+  const tblH = 5.13 - tblY - 0.05;
 
   slide.addShape(pptx.ShapeType.roundRect, {
     x: rowX,

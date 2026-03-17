@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import Swal from 'sweetalert2';
 import {
   Settings,
   Layout,
@@ -16,7 +17,6 @@ import {
   Presentation,
   FileText,
   CheckCircle2,
-  FlaskConical,
 } from 'lucide-react';
 
 // Import types
@@ -29,7 +29,7 @@ import clientsData from './data/clients.json';
 import { getDummyDataForTemplate } from './data/dummyData';
 
 // Import components
-import { AppHeader, Toasts } from './components/report';
+import { AppHeader, Toasts, ExportProgressModal } from './components/report';
 import {
   PlaceholderSlide,
   ReportCoverVisual,
@@ -102,6 +102,8 @@ const ReportSetupInterface: React.FC = () => {
   >('setup');
   const [editingTitleId, setEditingTitleId] = useState<number | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState({ current: 0, total: 0, title: '' });
+  const [exportDone, setExportDone] = useState(false);
   const [isDownloadOpen, setIsDownloadOpen] = useState(false);
   const [showDebugModal, setShowDebugModal] = useState(false);
   const [debugSelectedIds, setDebugSelectedIds] = useState<Set<number>>(new Set());
@@ -134,28 +136,13 @@ const ReportSetupInterface: React.FC = () => {
   const [brandList, setBrandList] = useState<
     { id: number; brand_name_identifier: string; brand_name_display: string }[]
   >([]);
+  const [isBrandsLoading, setIsBrandsLoading] = useState(false);
 
   // Load slides from localStorage on mount
   useEffect(() => {
     setSlides(loadSlidesFromStorage());
   }, []);
 
-  // Fetch client brands from database
-  useEffect(() => {
-    fetch('/api/brands')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.brands && data.brands.length > 0) {
-          setBrandList(data.brands);
-          setConfig((prev) => ({
-            ...prev,
-            // Always default to first brand from DB on initial load (empty = not yet set)
-            clientName: prev.clientName || data.brands[0].brand_name_display,
-          }));
-        }
-      })
-      .catch(console.error);
-  }, []);
 
   // Auto-save slides to localStorage whenever they change
   useEffect(() => {
@@ -163,6 +150,34 @@ const ReportSetupInterface: React.FC = () => {
   }, [slides]);
 
   const [config, setConfig] = useState<ReportConfig>(getDefaultConfig());
+
+  // Fetch client brands active in the selected period
+  useEffect(() => {
+    const MONTH_NUMS: Record<string, string> = {
+      January: '01', February: '02', March: '03', April: '04',
+      May: '05', June: '06', July: '07', August: '08',
+      September: '09', October: '10', November: '11', December: '12',
+    };
+    const [month, year] = config.period.split(' ');
+    const monthYear = `${MONTH_NUMS[month] ?? '01'}-${year}`;
+    setIsBrandsLoading(true);
+    fetch(`/api/brands?month_year=${monthYear}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.brands && data.brands.length > 0) {
+          setBrandList(data.brands);
+          setConfig((prev) => ({
+            ...prev,
+            clientName: prev.clientName || data.brands[0].brand_name_display,
+          }));
+        } else {
+          setBrandList([]);
+        }
+      })
+      .catch(console.error)
+      .finally(() => setIsBrandsLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.period]);
 
   // Re-fill clientName from already-fetched brandList whenever it becomes empty (e.g. after reset)
   useEffect(() => {
@@ -321,9 +336,65 @@ const ReportSetupInterface: React.FC = () => {
     }, 1500);
   };
 
+  const saveExportHistory = async (blob: Blob, slideCount: number, isPartial: boolean) => {
+    // 1. Capture cover slide as image and upload to Cloudinary
+    let coverImageUrl: string | null = null;
+    try {
+      const coverSlide = slides.find((s) => s.type === 'cover');
+      if (coverSlide) {
+        const el = document.querySelector(
+          `[data-slide-id="${coverSlide.id}"][data-slide-export="true"]`,
+        ) as HTMLElement | null;
+        if (el) {
+          const { toPng } = await import('html-to-image');
+          const base64 = await toPng(el, { pixelRatio: 0.4 });
+          const uploadRes = await fetch('/api/upload/cover-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ base64 }),
+          });
+          const uploadData = await uploadRes.json();
+          coverImageUrl = uploadData.url ?? null;
+        }
+      }
+    } catch (err) {
+      console.error('Cover capture failed:', err);
+    }
+
+    // 2. Upload PPTX + metadata to server (GCS)
+    try {
+      // Convert "January 2026" → "01-2026"
+      const MONTH_NUMS: Record<string, string> = {
+        January: '01', February: '02', March: '03', April: '04',
+        May: '05', June: '06', July: '07', August: '08',
+        September: '09', October: '10', November: '11', December: '12',
+      };
+      const [mon, yr] = config.period.split(' ');
+      const periodFormatted = `${MONTH_NUMS[mon] ?? '01'}-${yr}`;
+
+      const formData = new FormData();
+      formData.append('file', blob, 'export.pptx');
+      formData.append('brandName', config.clientName);
+      formData.append('period', periodFormatted);
+      formData.append('slideCount', String(slideCount));
+      formData.append('isPartial', String(isPartial));
+      formData.append('config', JSON.stringify(config));
+      if (coverImageUrl) formData.append('coverImageUrl', coverImageUrl);
+      await fetch('/api/export-history', { method: 'POST', body: formData });
+    } catch (err) {
+      console.error('Failed to save export history:', err);
+    }
+  };
+
   const handleDownloadWrapper = async (format: string) => {
     setIsDownloadOpen(false);
-    await handleDownload(format, slides, config, setIsExporting, setShowExportToast);
+    setExportDone(false);
+    setExportProgress({ current: 0, total: slides.length, title: '' });
+    await handleDownload(format, slides, config, setIsExporting, setShowExportToast,
+      (current, total, title) => setExportProgress({ current, total, title }),
+      () => setExportDone(true),
+      format === 'pptx' ? (blob, count) => saveExportHistory(blob, count, false) : undefined,
+    );
   };
 
   const openDebugModal = () => {
@@ -337,7 +408,13 @@ const ReportSetupInterface: React.FC = () => {
     setShowDebugModal(false);
     const selected = slides.filter((s) => debugSelectedIds.has(s.id));
     if (selected.length === 0) return;
-    await handleDownload('pptx', selected, config, setIsExporting, setShowExportToast);
+    setExportDone(false);
+    setExportProgress({ current: 0, total: selected.length, title: '' });
+    await handleDownload('pptx', selected, config, setIsExporting, setShowExportToast,
+      (current, total, title) => setExportProgress({ current, total, title }),
+      () => setExportDone(true),
+      (blob, count) => saveExportHistory(blob, count, true),
+    );
   };
 
   const goToSlide = (id: number) => {
@@ -382,17 +459,17 @@ const ReportSetupInterface: React.FC = () => {
     setSlides(slides.map((s) => (s.id === id ? { ...s, title: newTitle } : s)));
   };
 
-  const handleDeleteSlide = (slideId: number) => {
+  const handleDeleteSlide = async (slideId: number) => {
     // Prevent deleting the cover slide
     const slideToDelete = slides.find((s) => s.id === slideId);
     if (slideToDelete?.type === 'cover') {
-      alert('Cannot delete the cover slide!');
+      Swal.fire({ icon: 'warning', title: 'Cannot delete cover slide', text: 'The cover slide cannot be removed.', confirmButtonColor: '#1e293b' });
       return;
     }
 
-    if (confirm('Are you sure you want to delete this slide?')) {
+    const result = await Swal.fire({ icon: 'warning', title: 'Delete slide?', text: 'This action cannot be undone.', showCancelButton: true, confirmButtonText: 'Delete', confirmButtonColor: '#dc2626', cancelButtonColor: '#94a3b8' });
+    if (result.isConfirmed) {
       setSlides(slides.filter((s) => s.id !== slideId));
-      // If the deleted slide was active, go back to review
       if (activeSlideId === slideId) {
         setActiveSlideId(null);
         setCurrentStep('review');
@@ -449,11 +526,11 @@ const ReportSetupInterface: React.FC = () => {
       if (!response.ok) throw new Error('Gagal menyimpan template');
 
       setIsSaveModalOpen(false);
-      alert(`Template "${name}" berhasil disimpan!`);
+      await Swal.fire({ icon: 'success', title: 'Template Saved!', text: `"${name}" berhasil disimpan.`, confirmButtonColor: '#1e293b', timer: 2000, showConfirmButton: false });
       resetToInitialState();
     } catch (error) {
       console.error('Save template error:', error);
-      alert('Gagal menyimpan template');
+      Swal.fire({ icon: 'error', title: 'Gagal!', text: 'Gagal menyimpan template.', confirmButtonColor: '#1e293b' });
     }
   };
 
@@ -473,16 +550,17 @@ const ReportSetupInterface: React.FC = () => {
       if (!response.ok) throw new Error('Gagal menyimpan report');
 
       setIsSaveModalOpen(false);
-      alert(`Report "${name}" berhasil disimpan!`);
+      await Swal.fire({ icon: 'success', title: 'Report Saved!', text: `"${name}" berhasil disimpan.`, confirmButtonColor: '#1e293b', timer: 2000, showConfirmButton: false });
       resetToInitialState();
     } catch (error) {
       console.error('Save report error:', error);
-      alert('Gagal menyimpan report');
+      Swal.fire({ icon: 'error', title: 'Gagal!', text: 'Gagal menyimpan report.', confirmButtonColor: '#1e293b' });
     }
   };
 
-  const handleLoadTemplate = (template: any) => {
-    if (confirm('Muat template ini? Perubahan yang belum disimpan akan hilang.')) {
+  const handleLoadTemplate = async (template: any) => {
+    const res = await Swal.fire({ icon: 'question', title: 'Load Template?', text: 'Perubahan yang belum disimpan akan hilang.', showCancelButton: true, confirmButtonText: 'Load', confirmButtonColor: '#1e293b', cancelButtonColor: '#94a3b8' });
+    if (res.isConfirmed) {
       console.log('🔵 Loading template structure:', template);
       console.log('🔵 Current selected brand:', config.clientName);
 
@@ -574,8 +652,9 @@ const ReportSetupInterface: React.FC = () => {
     }
   };
 
-  const handleLoadReport = (report: any) => {
-    if (confirm('Muat report ini? Perubahan yang belum disimpan akan hilang.')) {
+  const handleLoadReport = async (report: any) => {
+    const res2 = await Swal.fire({ icon: 'question', title: 'Load Report?', text: 'Perubahan yang belum disimpan akan hilang.', showCancelButton: true, confirmButtonText: 'Load', confirmButtonColor: '#1e293b', cancelButtonColor: '#94a3b8' });
+    if (res2.isConfirmed) {
       setConfig(report.config);
       setSlides(report.slides);
       setIsLoadModalOpen(false);
@@ -826,6 +905,19 @@ const ReportSetupInterface: React.FC = () => {
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800 pb-20 relative">
       <AppHeader currentStep={currentStep} />
 
+      {/* EXPORT PROGRESS MODAL */}
+      <ExportProgressModal
+        isOpen={(isExporting && exportProgress.total > 0) || exportDone}
+        current={exportProgress.current}
+        total={exportProgress.total}
+        currentTitle={exportProgress.title}
+        isDone={exportDone}
+        onClose={() => {
+          setExportDone(false);
+          setExportProgress({ current: 0, total: 0, title: '' });
+        }}
+      />
+
       {/* TOASTS */}
       <Toasts
         showSaveToast={showSaveToast}
@@ -886,28 +978,6 @@ const ReportSetupInterface: React.FC = () => {
                   <h2 className="font-semibold text-slate-700 flex items-center gap-2">
                     <Settings size={16} /> Setup Report
                   </h2>
-                  <button
-                    onClick={() => setIsLoadReportsModalOpen(true)}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm hover:shadow-md"
-                    title="Load Saved Reports"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                      <polyline points="7 10 12 15 17 10"></polyline>
-                      <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                    Load
-                  </button>
                 </div>
                 <div className="p-6 space-y-6">
                   {/* Cover Design Button */}
@@ -987,58 +1057,15 @@ const ReportSetupInterface: React.FC = () => {
                         <label className="block text-[10px] font-semibold text-slate-500 mb-1">
                           Period
                         </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <select
-                            value={config.period.split(' ')[0] || 'January'}
-                            onChange={(e) => {
-                              const year =
-                                config.period.split(' ')[1] || String(new Date().getFullYear());
-                              setConfig({
-                                ...config,
-                                period: `${e.target.value} ${year}`,
-                                reportType: 'Monthly',
-                              });
-                            }}
-                            className="w-full border p-2 rounded text-sm bg-white"
-                          >
-                            {[
-                              'January',
-                              'February',
-                              'March',
-                              'April',
-                              'May',
-                              'June',
-                              'July',
-                              'August',
-                              'September',
-                              'October',
-                              'November',
-                              'December',
-                            ].map((m) => (
-                              <option key={m} value={m}>
-                                {m}
-                              </option>
-                            ))}
-                          </select>
-                          <select
-                            value={config.period.split(' ')[1] || String(new Date().getFullYear())}
-                            onChange={(e) => {
-                              const month = config.period.split(' ')[0] || 'January';
-                              setConfig({
-                                ...config,
-                                period: `${month} ${e.target.value}`,
-                                reportType: 'Monthly',
-                              });
-                            }}
-                            className="w-full border p-2 rounded text-sm bg-white"
-                          >
-                            {[2024, 2025, 2026, 2027].map((y) => (
-                              <option key={y} value={y}>
-                                {y}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                        <select
+                          value={config.period}
+                          onChange={(e) => setConfig({ ...config, period: e.target.value, reportType: 'Monthly' })}
+                          className="w-full border p-2 rounded text-sm bg-white"
+                        >
+                          {getPeriodOptions('Monthly').map((p) => (
+                            <option key={p} value={p}>{p}</option>
+                          ))}
+                        </select>
                       </div>
                     </div>
 
@@ -1052,8 +1079,10 @@ const ReportSetupInterface: React.FC = () => {
                         onChange={handleClientChange}
                         className="w-full border p-2 rounded text-sm bg-white cursor-pointer hover:border-blue-400 focus:border-blue-500 focus:outline-none transition-colors"
                       >
-                        {brandList.length === 0 ? (
+                        {isBrandsLoading ? (
                           <option value="">Loading...</option>
+                        ) : brandList.length === 0 ? (
+                          <option value="">No client for this period</option>
                         ) : (
                           brandList.map((b) => (
                             <option key={b.id} value={b.brand_name_display}>
@@ -1179,16 +1208,19 @@ const ReportSetupInterface: React.FC = () => {
                 <div className="bg-slate-50 p-4 border-t border-slate-200 space-y-2">
                   <button
                     onClick={() => setIsTemplateSelectionOpen(true)}
-                    className="w-full py-2 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 transition flex items-center justify-center gap-2 text-sm"
+                    disabled={!config.coverDesign?.logoData}
+                    title={!config.coverDesign?.logoData ? 'Please upload a logo first' : ''}
+                    className="w-full py-2 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 transition flex items-center justify-center gap-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     Next: Review Content <ChevronRight size={16} />
                   </button>
                   <button
-                    onClick={() => {
-                      if (confirm('Clear all saved data? This cannot be undone.')) {
+                    onClick={async () => {
+                      const r = await Swal.fire({ icon: 'warning', title: 'Clear All Data?', text: 'This cannot be undone.', showCancelButton: true, confirmButtonText: 'Clear', confirmButtonColor: '#dc2626', cancelButtonColor: '#94a3b8' });
+                      if (r.isConfirmed) {
                         clearAllStorage();
                         resetToInitialState();
-                        alert('All data cleared!');
+                        Swal.fire({ icon: 'success', title: 'Cleared!', text: 'All data has been cleared.', confirmButtonColor: '#1e293b', timer: 1500, showConfirmButton: false });
                       }
                     }}
                     className="w-full py-2 bg-white text-red-600 border border-red-200 font-medium rounded-lg hover:bg-red-50 transition flex items-center justify-center gap-2 text-xs"
@@ -1248,7 +1280,7 @@ const ReportSetupInterface: React.FC = () => {
             <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <button
                 onClick={goBack}
-                className="flex items-center gap-2 text-slate-500 hover:text-slate-800 text-sm font-medium transition-colors"
+                className="flex items-center gap-2 text-slate-600 hover:text-slate-900 text-sm font-medium transition-colors px-3 py-1.5 rounded-lg border border-slate-300 hover:border-slate-400 hover:bg-slate-50"
               >
                 <ArrowLeft size={16} /> Back to Configuration
               </button>
@@ -1312,14 +1344,14 @@ const ReportSetupInterface: React.FC = () => {
                         className="w-full text-left px-4 py-3 hover:bg-amber-50 flex items-center gap-3 transition-colors border-t border-slate-100"
                       >
                         <div className="bg-amber-50 text-amber-500 p-1.5 rounded-lg">
-                          <FlaskConical size={16} />
+                          <Presentation size={16} />
                         </div>
                         <div>
                           <span className="text-xs font-bold text-slate-800 block">
-                            Debug Export
+                            Export Selected Slides
                           </span>
                           <span className="text-[10px] text-amber-500 font-medium">
-                            Select slides only
+                            Choose slides to export
                           </span>
                         </div>
                       </button>
@@ -1528,31 +1560,27 @@ const ReportSetupInterface: React.FC = () => {
                   ? `Viewing: ${slides.find((s) => s.id === activeSlideId)?.title}`
                   : `Editing: ${slides.find((s) => s.id === activeSlideId)?.title}`}
               </h2>
-              <div className="flex items-center gap-3">
-                {slides.find((s) => s.id === activeSlideId)?.type !== 'cover' &&
-                  !slides.find((s) => s.id === activeSlideId)?.type.startsWith('ic_') && (
+              <div className="flex flex-col items-end gap-1.5">
+                <button
+                  onClick={goBackToReview}
+                  className="text-xs font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-300 hover:border-slate-400 hover:bg-slate-50 transition-colors"
+                >
+                  <ArrowLeft size={12} /> Back to Configuration
+                </button>
+                <div className="flex items-center gap-2">
+                  {slides.find((s) => s.id === activeSlideId)?.type !== 'cover' && (
                     <button
                       onClick={() => handleDeleteSlide(activeSlideId!)}
                       className="text-xs font-medium text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors border border-red-200 hover:border-red-300"
                       title="Delete this slide"
                     >
-                      <X size={14} /> Delete Slide
+                      <X size={14} /> Delete
                     </button>
                   )}
-                {slides.find((s) => s.id === activeSlideId)?.type.startsWith('ic_') && (
-                  <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200 flex items-center gap-1.5">
-                    Live Data – View Only
+                  <span className="text-xs font-mono bg-slate-100 px-3 py-1 rounded text-slate-600">
+                    {slides.findIndex((s) => s.id === activeSlideId) + 1} / {slides.length}
                   </span>
-                )}
-                <span className="text-xs font-mono bg-slate-100 px-3 py-1 rounded text-slate-600">
-                  {slides.findIndex((s) => s.id === activeSlideId) + 1} / {slides.length}
-                </span>
-                <button
-                  onClick={goBackToReview}
-                  className="text-xs font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1"
-                >
-                  <ArrowLeft size={12} /> Back to Review
-                </button>
+                </div>
               </div>
             </div>
             <div className="w-full max-w-7xl flex items-center gap-4 justify-center">
@@ -1630,7 +1658,7 @@ const ReportSetupInterface: React.FC = () => {
       </main>
 
       {/* Hidden slides for export */}
-      <div className="fixed -left-2499.75 top-0">
+      <div style={{ position: 'fixed', left: '-99999px', top: '-99999px', overflow: 'hidden', pointerEvents: 'none', zIndex: -1 }}>
         {slides.map((slide, index) => {
           const currentPage = index + 1;
           const totalPages = slides.length;
@@ -1762,6 +1790,7 @@ const ReportSetupInterface: React.FC = () => {
                     isThumbnail={false}
                     currentPage={currentPage}
                     totalPages={totalPages}
+                    savedInsight={slide.content?.insight}
                   />
                 ) : null
               ) : slide.type === 'ic_ig_best_least' ? (
@@ -1974,24 +2003,15 @@ const ReportSetupInterface: React.FC = () => {
             <p className="text-slate-600 mb-6">Choose how you want to begin</p>
 
             <div className="grid grid-cols-3 gap-4">
-              {/* Start from scratch */}
-              <button
-                onClick={() => {
-                  // Clear old localStorage and reset slides only, KEEP current config
-                  clearCurrentWorkOnly();
-                  setSlides([{ id: 1, type: 'cover', title: 'Report Cover', content: {} }]);
-                  // DON'T reset config - keep user's selections!
-                  setIsTemplateSelectionOpen(false);
-                  setCurrentStep('review');
-                }}
-                className="p-6 border-2 border-slate-200 rounded-xl hover:border-blue-500 hover:bg-blue-50/50 transition-all group"
-              >
-                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3 group-hover:bg-blue-200 transition-colors">
+              {/* Start from scratch - Coming Soon */}
+              <div className="relative p-6 border-2 border-slate-200 rounded-xl opacity-50 cursor-not-allowed">
+                <span className="absolute top-2 right-2 text-[10px] font-bold bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-wide">Coming Soon</span>
+                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
                   <Plus size={24} className="text-blue-600" />
                 </div>
                 <h4 className="font-bold text-slate-900 mb-2">Start Fresh</h4>
                 <p className="text-sm text-slate-600">Begin with an empty report</p>
-              </button>
+              </div>
 
               {/* InnerCircle Template */}
               <button
@@ -2246,21 +2266,15 @@ const ReportSetupInterface: React.FC = () => {
                 <p className="text-sm text-slate-600">Social media report template</p>
               </button>
 
-              {/* Load from template */}
-              <button
-                onClick={() => {
-                  setIsTemplateSelectionOpen(false);
-                  setLoadMode('template');
-                  setIsLoadModalOpen(true);
-                }}
-                className="p-6 border-2 border-slate-200 rounded-xl hover:border-purple-500 hover:bg-purple-50/50 transition-all group"
-              >
-                <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3 group-hover:bg-purple-200 transition-colors">
+              {/* Load from template - Coming Soon */}
+              <div className="relative p-6 border-2 border-slate-200 rounded-xl opacity-50 cursor-not-allowed">
+                <span className="absolute top-2 right-2 text-[10px] font-bold bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-wide">Coming Soon</span>
+                <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
                   <FileText size={24} className="text-purple-600" />
                 </div>
                 <h4 className="font-bold text-slate-900 mb-2">Load Template</h4>
                 <p className="text-sm text-slate-600">Use a saved template</p>
-              </button>
+              </div>
             </div>
 
             <button
@@ -2281,29 +2295,17 @@ const ReportSetupInterface: React.FC = () => {
             <p className="text-slate-600 mb-6">Choose how you want to save your work</p>
 
             <div className="space-y-3">
-              <button
-                onClick={() => {
-                  setSaveMode('template');
-                  setIsExitModalOpen(false);
-                  setIsSaveModalOpen(true);
-                }}
-                className="w-full p-4 border-2 border-slate-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-all text-left"
-              >
+              <div className="relative w-full p-4 border-2 border-slate-200 rounded-lg opacity-50 cursor-not-allowed text-left">
+                <span className="absolute top-2 right-2 text-[10px] font-bold bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-wide">Coming Soon</span>
                 <div className="font-bold text-slate-900">Save as Template</div>
                 <div className="text-sm text-slate-600">Save structure only (reusable)</div>
-              </button>
+              </div>
 
-              <button
-                onClick={() => {
-                  setSaveMode('report');
-                  setIsExitModalOpen(false);
-                  setIsSaveModalOpen(true);
-                }}
-                className="w-full p-4 border-2 border-slate-200 rounded-lg hover:border-green-500 hover:bg-green-50 transition-all text-left"
-              >
+              <div className="relative w-full p-4 border-2 border-slate-200 rounded-lg opacity-50 cursor-not-allowed text-left">
+                <span className="absolute top-2 right-2 text-[10px] font-bold bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-wide">Coming Soon</span>
                 <div className="font-bold text-slate-900">Save Report</div>
                 <div className="text-sm text-slate-600">Save with all data</div>
-              </button>
+              </div>
 
               <button
                 onClick={() => {
@@ -2335,12 +2337,12 @@ const ReportSetupInterface: React.FC = () => {
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="bg-amber-50 text-amber-500 p-1.5 rounded-lg">
-                  <FlaskConical size={16} />
+                  <Presentation size={16} />
                 </div>
                 <div>
-                  <h2 className="text-sm font-bold text-slate-900">Debug Export</h2>
+                  <h2 className="text-sm font-bold text-slate-900">Export Selected Slides</h2>
                   <p className="text-[10px] text-slate-400">
-                    Select which slides to export as PPTX
+                    Choose which slides to export as PPTX
                   </p>
                 </div>
               </div>

@@ -4,7 +4,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 export const generateGeminiContent = async (
   prompt: string,
   systemInstruction: string = '',
-  model: string = 'gemini-3-pro-preview',
+  model: string = 'gemini-2.5-flash',
 ): Promise<string> => {
   // Try to get API key from environment or localStorage
   const apiKey =

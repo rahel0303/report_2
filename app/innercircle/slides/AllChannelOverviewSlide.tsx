@@ -484,6 +484,7 @@ export const AllChannelOverviewSlide: React.FC<Props> = ({
             ) : insight ? (
               <div
                 data-ic-insight
+                data-insight-raw={insight}
                 className={`text-[11px] leading-relaxed font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
                 style={{ cursor: isThumbnail ? 'default' : 'pointer' }}
                 onClick={() => {
