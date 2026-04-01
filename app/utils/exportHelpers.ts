@@ -19,10 +19,7 @@ async function imageUrlToBase64(url: string): Promise<string | null> {
 }
 
 /** For a list of posts, resolve missing image_urls via thumbnail API, then convert all to base64 */
-async function resolvePostImages(
-  posts: any[],
-  channel = 'instagram',
-): Promise<any[]> {
+async function resolvePostImages(posts: any[], channel = 'instagram'): Promise<any[]> {
   return Promise.all(
     posts.map(async (post) => {
       let image_url: string | null = post.image_url || null;
@@ -34,8 +31,8 @@ async function resolvePostImages(
             channel === 'tiktok'
               ? `/api/innercircle/tt-thumbnail?url=${encodeURIComponent(post.url)}`
               : channel === 'twitter'
-              ? `/api/innercircle/tw-thumbnail?url=${encodeURIComponent(post.url)}`
-              : `/api/innercircle/ig-thumbnail?url=${encodeURIComponent(post.url)}&channel=${channel}`;
+                ? `/api/innercircle/tw-thumbnail?url=${encodeURIComponent(post.url)}`
+                : `/api/innercircle/ig-thumbnail?url=${encodeURIComponent(post.url)}&channel=${channel}`;
           const res = await fetch(endpoint);
           const d = await res.json();
           image_url = d.image_url || null;
@@ -201,7 +198,12 @@ export const handleDownload = async (
   try {
     if (format === 'pdf') {
       const Swal = (await import('sweetalert2')).default;
-      Swal.fire({ icon: 'info', title: 'Coming Soon', text: 'PDF export is coming soon. Please use PowerPoint export for now.', confirmButtonColor: '#1e293b' });
+      Swal.fire({
+        icon: 'info',
+        title: 'Coming Soon',
+        text: 'PDF export is coming soon. Please use PowerPoint export for now.',
+        confirmButtonColor: '#1e293b',
+      });
       setIsExporting(false);
       return;
     } else if (format === 'pptx') {
@@ -214,6 +216,16 @@ export const handleDownload = async (
       pptx.title = config.reportTitle;
 
       console.log('📸 Capturing slides as images...');
+
+      // Pre-load autometric branding logos for InnerCircle footer
+      if (slides.some((s) => s.type.startsWith('ic_'))) {
+        const [iconData, longData] = await Promise.all([
+          imageUrlToBase64('/logo-icon.png'),
+          imageUrlToBase64('/autometric-logo-icon.png'),
+        ]);
+        const { setAutometricLogoData } = await import('./pptxExporter');
+        setAutometricLogoData(iconData, longData);
+      }
 
       for (let i = 0; i < slides.length; i++) {
         const slide = slides[i];
@@ -1246,11 +1258,32 @@ export const handleDownload = async (
                       `/api/innercircle/ig-content-pillar?brand=${encodeURIComponent(config.clientName)}&period=${encodeURIComponent(config.period)}`,
                     );
                     const apiData = await apiRes.json();
+                    // Merge saved insights from slide.content.pillarInsights
+                    let savedPillarInsights: Record<string, string> = {};
+                    try {
+                      if (slide.content?.pillarInsights) {
+                        savedPillarInsights = JSON.parse(slide.content.pillarInsights);
+                      }
+                    } catch {}
                     pillars = (apiData.pillars || []).map((p: any) => ({
                       pillar: p.pillar,
                       lowest: p.lowest,
                       highest: p.highest,
-                      insight: '',
+                      insight: savedPillarInsights[p.pillar] || '',
+                    }));
+                  } catch {}
+                }
+
+                // Also merge saved insights into DOM-read pillars (in case insight was empty)
+                if (pillars.length > 0) {
+                  try {
+                    let savedPillarInsights: Record<string, string> = {};
+                    if (slide.content?.pillarInsights) {
+                      savedPillarInsights = JSON.parse(slide.content.pillarInsights);
+                    }
+                    pillars = pillars.map((p: any) => ({
+                      ...p,
+                      insight: p.insight || savedPillarInsights[p.pillar] || '',
                     }));
                   } catch {}
                 }
@@ -1303,7 +1336,8 @@ export const handleDownload = async (
                     const apiData = await apiRes.json();
                     posts = apiData.posts || [];
                     summary = summary || apiData.summary || null;
-                    sentiments = sentiments || apiData.sentiments || { Negative: [], Positive: [], Neutral: [] };
+                    sentiments = sentiments ||
+                      apiData.sentiments || { Negative: [], Positive: [], Neutral: [] };
                   } catch {}
                 }
 
@@ -1470,7 +1504,12 @@ export const handleDownload = async (
                 }
 
                 // Fallback: fetch from API if slide was never opened
-                if (highest.length === 0 && lowest.length === 0 && config.clientName && config.period) {
+                if (
+                  highest.length === 0 &&
+                  lowest.length === 0 &&
+                  config.clientName &&
+                  config.period
+                ) {
                   try {
                     const apiRes = await fetch(
                       `/api/innercircle/tt-best-least?brand=${encodeURIComponent(config.clientName)}&period=${encodeURIComponent(config.period)}&mode=${mode}`,
@@ -1597,7 +1636,12 @@ export const handleDownload = async (
                 }
 
                 // Fallback: fetch from API if slide was never opened
-                if (highest.length === 0 && lowest.length === 0 && config.clientName && config.period) {
+                if (
+                  highest.length === 0 &&
+                  lowest.length === 0 &&
+                  config.clientName &&
+                  config.period
+                ) {
                   try {
                     const apiRes = await fetch(
                       `/api/innercircle/tw-best-least?brand=${encodeURIComponent(config.clientName)}&period=${encodeURIComponent(config.period)}`,
@@ -1646,7 +1690,12 @@ export const handleDownload = async (
                 }
 
                 // Fallback: fetch from API if slide was never opened
-                if (brandOwned.length === 0 && nonBrandOwned.length === 0 && config.clientName && config.period) {
+                if (
+                  brandOwned.length === 0 &&
+                  nonBrandOwned.length === 0 &&
+                  config.clientName &&
+                  config.period
+                ) {
                   try {
                     const apiRes = await fetch(
                       `/api/innercircle/tw-content?brand=${encodeURIComponent(config.clientName)}&period=${encodeURIComponent(config.period)}`,
@@ -1737,7 +1786,7 @@ export const handleDownload = async (
                 let igPosts: any[] = [];
                 let ttPosts: any[] = [];
                 let twPosts: any[] = [];
-                let narrative = '';
+                let insight = slide.content?.insight ?? '';
                 if (dataEl) {
                   try {
                     const parsed = JSON.parse(dataEl.getAttribute('data-comp-detail') || '{}');
@@ -1745,11 +1794,14 @@ export const handleDownload = async (
                     igPosts = parsed.igPosts || [];
                     ttPosts = parsed.ttPosts || [];
                     twPosts = parsed.twPosts || [];
-                    narrative = parsed.narrative || '';
+                    insight = parsed.insight || parsed.narrative || insight;
                   } catch {}
                 }
                 // Fallback: fetch from API if slide was never opened
-                if (!dataEl || (igPosts.length === 0 && ttPosts.length === 0 && twPosts.length === 0)) {
+                if (
+                  !dataEl ||
+                  (igPosts.length === 0 && ttPosts.length === 0 && twPosts.length === 0)
+                ) {
                   try {
                     const apiRes = await fetch(
                       `/api/innercircle/competitor-detail?brand=${encodeURIComponent(config.clientName || '')}&period=${encodeURIComponent(config.period || '')}&competitor=${encodeURIComponent(competitor)}`,
@@ -1776,7 +1828,7 @@ export const handleDownload = async (
                   igPosts,
                   ttPosts,
                   twPosts,
-                  narrative,
+                  insight,
                   currentPage: i + 1,
                   totalPages: slides.length,
                 });
@@ -1793,7 +1845,7 @@ export const handleDownload = async (
                 let growthSeries: any[] = [];
                 let mainBrandRow: any = null;
                 let compRow: any = null;
-                let narrative = '';
+                let insight = slide.content?.insight ?? '';
                 if (dataEl) {
                   try {
                     const parsed = JSON.parse(dataEl.getAttribute('data-comp-ig-focus') || '{}');
@@ -1802,7 +1854,7 @@ export const handleDownload = async (
                     growthSeries = parsed.growthSeries || [];
                     mainBrandRow = parsed.mainBrandRow || null;
                     compRow = parsed.compRow || null;
-                    narrative = parsed.narrative || '';
+                    insight = parsed.insight || parsed.narrative || insight;
                   } catch {}
                 }
                 // Fallback: fetch from API if slide was never opened
@@ -1829,7 +1881,7 @@ export const handleDownload = async (
                   growthSeries,
                   mainBrandRow,
                   compRow,
-                  narrative,
+                  insight,
                   currentPage: i + 1,
                   totalPages: slides.length,
                 });

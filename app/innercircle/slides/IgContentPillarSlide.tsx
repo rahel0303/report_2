@@ -1,18 +1,15 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  BarChart2,
-  TrendingDown,
-  TrendingUp,
-  Loader2,
-  Sparkles,
-  Send,
-  ExternalLink,
-} from 'lucide-react';
+import { BarChart2, TrendingDown, TrendingUp, Loader2, Sparkles, ExternalLink } from 'lucide-react';
 import { generateGeminiContent } from '@/app/utils/api';
-import { renderTextWithHighlights } from '@/app/utils/helpers';
 import { ReportConfig } from '@/app/types';
+import {
+  CONTENT_PILLAR_ANALYST_SYSTEM_PROMPT,
+  buildContentPillarPrompt,
+  parseContentPillarInsight,
+  type ParsedInsight,
+} from '@/app/innercircle/prompts/igContentPillarPrompt';
 import { SlideFooter } from '@/app/components/ui/SlideFooter';
 import { ChannelBadge } from '@/app/components/ui';
 import { generateLayoutTheme } from '@/app/utils/themeStyles';
@@ -43,12 +40,17 @@ interface PillarData {
   highest: PostItem[];
 }
 
+// Shared cache across all slide instances — same brand+period reuses one fetch
+const _pillarCache = new Map<string, PillarData[]>();
+
 interface Props {
   config: ReportConfig;
   isThumbnail?: boolean;
   currentPage?: number;
   totalPages?: number;
   pillarOffset?: number; // 0 = first 2 pillars, 2 = next 2, etc.
+  savedInsights?: string; // JSON of Record<string, string>
+  onInsightsChange?: (val: string) => void;
   onUpdate?: (key: string, value: any) => void;
 }
 
@@ -56,8 +58,6 @@ function fmtN(v: number | null | undefined): string {
   if (v === null || v === undefined) return '-';
   const n = Number(v);
   if (isNaN(n)) return '-';
-  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (Math.abs(n) >= 1_000) return (n / 1_000).toFixed(1) + 'K';
   return n.toLocaleString();
 }
 
@@ -208,6 +208,63 @@ const EmptyPostSlot: React.FC<{ accentColor: string }> = ({ accentColor }) => (
   />
 );
 
+// ─── inline bold renderer ─────────────────────────────────────
+const renderBoldInline = (text: string, color: string) =>
+  text.split(/(\*\*.*?\*\*)/g).map((part, i) =>
+    part.startsWith('**') && part.endsWith('**') ? (
+      <span key={i} className="font-bold" style={{ color }}>
+        {part.slice(2, -2)}
+      </span>
+    ) : (
+      <span key={i}>{part}</span>
+    ),
+  );
+
+// ─── PillarInsightView ────────────────────────────────────────
+const PillarInsightView: React.FC<{
+  raw: string;
+  isDark: boolean;
+  colorPrimary: string;
+  onEdit: () => void;
+}> = ({ raw, isDark, colorPrimary, onEdit }) => {
+  const parsed: ParsedInsight = React.useMemo(() => parseContentPillarInsight(raw), [raw]);
+  const bodyColor = isDark ? '#cbd5e1' : '#475569';
+  const labelColor = isDark ? '#e2e8f0' : '#374151';
+  return (
+    <div
+      data-ic-insight
+      data-insight-raw={raw}
+      className="flex flex-col gap-1 w-full min-w-0 cursor-pointer"
+      onClick={onEdit}
+    >
+      {parsed.analysis && (
+        <div
+          className="text-[8px] leading-relaxed wrap-break-word"
+          style={{ color: bodyColor, overflowWrap: 'break-word' }}
+        >
+          {renderBoldInline(parsed.analysis, colorPrimary)}
+        </div>
+      )}
+      {parsed.recommendations.length > 0 && (
+        <div className="flex flex-col gap-0.5 w-full min-w-0">
+          {parsed.recommendations.map((rec) => (
+            <div
+              key={rec.type}
+              className="text-[7.5px] leading-snug wrap-break-word"
+              style={{ color: bodyColor, overflowWrap: 'break-word' }}
+            >
+              <span className="font-bold" style={{ color: labelColor }}>
+                • {rec.type}:{' '}
+              </span>
+              {renderBoldInline(rec.text, colorPrimary)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Insight Box per pillar ────────────────────────────────────────────────────
 interface InsightBoxProps {
   isDark: boolean;
@@ -217,12 +274,8 @@ interface InsightBoxProps {
   isGenerating: boolean;
   isEditing: boolean;
   editValue: string;
-  showAiInput: boolean;
-  aiPrompt: string;
   onEdit: () => void;
   onSave: (v: string) => void;
-  onToggleAi: () => void;
-  onAiPromptChange: (v: string) => void;
   onGenerate: () => void;
 }
 
@@ -234,12 +287,8 @@ const InsightBox: React.FC<InsightBoxProps> = ({
   isGenerating,
   isEditing,
   editValue,
-  showAiInput,
-  aiPrompt,
   onEdit,
   onSave,
-  onToggleAi,
-  onAiPromptChange,
   onGenerate,
 }) => (
   <div
@@ -282,86 +331,53 @@ const InsightBox: React.FC<InsightBoxProps> = ({
             Done
           </button>
         )}
-        <button
-          onClick={onToggleAi}
-          className="flex items-center gap-0.5 px-1 py-0.5 rounded-full text-[6px] font-medium border"
-          style={
-            showAiInput
-              ? { backgroundColor: '#4f46e520', color: '#6366f1', borderColor: '#4f46e540' }
-              : {
-                  backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#eef2ff',
-                  color: isDark ? '#94a3b8' : '#6366f1',
-                  borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#c7d2fe',
-                }
-          }
-        >
-          <Sparkles size={6} />
-          <span>AI</span>
-        </button>
+        {!isEditing && (
+          <button
+            onClick={onGenerate}
+            disabled={isGenerating}
+            className="flex items-center gap-0.5 px-1 py-0.5 rounded-full text-[6px] font-medium border disabled:opacity-50"
+            style={{
+              backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#eef2ff',
+              color: isDark ? '#94a3b8' : '#6366f1',
+              borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#c7d2fe',
+            }}
+          >
+            {isGenerating ? <Loader2 size={6} className="animate-spin" /> : <Sparkles size={6} />}
+            <span>AI</span>
+          </button>
+        )}
       </div>
     </div>
 
-    {/* AI prompt row */}
-    {showAiInput && (
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          onGenerate();
-        }}
-        className="flex gap-0.5 px-1.5 py-0.5 border-b shrink-0"
-        style={{
-          backgroundColor: isDark ? 'rgba(99,102,241,0.08)' : '#eef2ff',
-          borderColor: isDark ? 'rgba(99,102,241,0.2)' : '#c7d2fe',
-        }}
-      >
-        <input
-          type="text"
-          value={aiPrompt}
-          onChange={(e) => onAiPromptChange(e.target.value)}
-          placeholder="Optional focus…"
-          maxLength={150}
-          className="flex-1 text-[6px] px-1 py-0.5 rounded border focus:outline-none placeholder:opacity-40"
-          style={{
-            background: isDark ? 'rgba(255,255,255,0.08)' : '#fff',
-            borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#c7d2fe',
-            color: isDark ? '#fff' : '#374151',
-          }}
-        />
-        <button
-          type="submit"
-          disabled={isGenerating}
-          className="bg-indigo-600 text-white px-1 rounded hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center"
-        >
-          {isGenerating ? <Loader2 size={7} className="animate-spin" /> : <Send size={7} />}
-        </button>
-      </form>
-    )}
-
     {/* Content */}
-    <div className="px-1.5 py-1 flex-1 overflow-y-auto">
+    <div className="px-1.5 py-1 flex-1 overflow-y-auto overflow-x-hidden min-w-0">
       {isGenerating ? (
         <div className="flex items-center gap-1 opacity-60">
           <Sparkles size={7} className="text-indigo-500 animate-spin" />
-          <span className="text-[6px] text-indigo-500 animate-pulse">Analyzing…</span>
+          <span className="text-[8px] text-indigo-500 animate-pulse">Analyzing…</span>
         </div>
       ) : isEditing ? (
         <textarea
           value={editValue}
           onChange={(e) => onSave(e.target.value)}
           autoFocus
-          className="w-full h-full resize-none text-[6px] leading-relaxed focus:outline-none bg-transparent"
+          className="w-full h-full resize-none text-[8px] leading-relaxed focus:outline-none bg-transparent"
           style={{ color: isDark ? '#cbd5e1' : '#374151' }}
         />
       ) : insight ? (
-        <div
-          className="text-[6px] leading-relaxed"
-          style={{ color: isDark ? '#cbd5e1' : '#475569' }}
-        >
-          {renderTextWithHighlights(insight, isDark, colorPrimary)}
-        </div>
+        <PillarInsightView
+          raw={insight}
+          isDark={isDark}
+          colorPrimary={colorPrimary}
+          onEdit={onEdit}
+        />
       ) : (
-        <span className="text-[6px]" style={{ color: isDark ? '#4b5563' : '#94a3b8' }}>
-          Click AI to generate, or Edit to type manually.
+        <span
+          className="text-[8px] cursor-pointer"
+          style={{ color: isDark ? '#4b5563' : '#94a3b8' }}
+          onClick={onGenerate}
+        >
+          Click AI to generate.
         </span>
       )}
     </div>
@@ -379,12 +395,8 @@ interface PillarSectionProps {
   isGenerating: boolean;
   isEditing: boolean;
   editValue: string;
-  showAiInput: boolean;
-  aiPrompt: string;
   onEditStart: () => void;
   onEditSave: (v: string) => void;
-  onToggleAi: () => void;
-  onAiPromptChange: (v: string) => void;
   onGenerate: () => void;
 }
 
@@ -414,12 +426,8 @@ const PillarSection: React.FC<PillarSectionProps> = ({
   isGenerating,
   isEditing,
   editValue,
-  showAiInput,
-  aiPrompt,
   onEditStart,
   onEditSave,
-  onToggleAi,
-  onAiPromptChange,
   onGenerate,
 }) => (
   <div className="flex gap-1.5 w-full h-full min-h-0 overflow-hidden">
@@ -448,22 +456,7 @@ const PillarSection: React.FC<PillarSectionProps> = ({
       </span>
     </div>
 
-    {/* LOWEST section — flex-1, 2 rows × 3 cards */}
-    <div className="flex-1 flex flex-col gap-0.5 min-w-0 min-h-0">
-      <div className="flex items-center gap-0.5 shrink-0">
-        <TrendingDown size={6} style={{ color: COLOR_LOW }} />
-        <span
-          className="text-[5.5px] font-bold uppercase tracking-wide"
-          style={{ color: COLOR_LOW }}
-        >
-          Lowest
-        </span>
-      </div>
-      <PostRow posts={data.lowest} indices={[0, 1, 2]} accentColor={COLOR_LOW} isDark={isDark} />
-      <PostRow posts={data.lowest} indices={[3, 4, 5]} accentColor={COLOR_LOW} isDark={isDark} />
-    </div>
-
-    {/* HIGHEST section — flex-1, 2 rows × 3 cards */}
+    {/* LEFT: HIGHEST section */}
     <div className="flex-1 flex flex-col gap-0.5 min-w-0 min-h-0">
       <div className="flex items-center gap-0.5 shrink-0">
         <TrendingUp size={6} style={{ color: COLOR_HIGH }} />
@@ -476,6 +469,21 @@ const PillarSection: React.FC<PillarSectionProps> = ({
       </div>
       <PostRow posts={data.highest} indices={[0, 1, 2]} accentColor={COLOR_HIGH} isDark={isDark} />
       <PostRow posts={data.highest} indices={[3, 4, 5]} accentColor={COLOR_HIGH} isDark={isDark} />
+    </div>
+
+    {/* RIGHT: LOWEST section */}
+    <div className="flex-1 flex flex-col gap-0.5 min-w-0 min-h-0">
+      <div className="flex items-center gap-0.5 shrink-0">
+        <TrendingDown size={6} style={{ color: COLOR_LOW }} />
+        <span
+          className="text-[5.5px] font-bold uppercase tracking-wide"
+          style={{ color: COLOR_LOW }}
+        >
+          Lowest
+        </span>
+      </div>
+      <PostRow posts={data.lowest} indices={[0, 1, 2]} accentColor={COLOR_LOW} isDark={isDark} />
+      <PostRow posts={data.lowest} indices={[3, 4, 5]} accentColor={COLOR_LOW} isDark={isDark} />
     </div>
 
     {/* INSIGHT box — fixed width */}
@@ -497,12 +505,8 @@ const PillarSection: React.FC<PillarSectionProps> = ({
         isGenerating={isGenerating}
         isEditing={isEditing}
         editValue={editValue}
-        showAiInput={showAiInput}
-        aiPrompt={aiPrompt}
         onEdit={onEditStart}
         onSave={onEditSave}
-        onToggleAi={onToggleAi}
-        onAiPromptChange={onAiPromptChange}
         onGenerate={onGenerate}
       />
     </div>
@@ -516,6 +520,8 @@ export const IgContentPillarSlide: React.FC<Props> = ({
   currentPage,
   totalPages,
   pillarOffset = 0,
+  savedInsights,
+  onInsightsChange,
   onUpdate,
 }) => {
   const [pillars, setPillars] = useState<PillarData[]>([]);
@@ -523,15 +529,33 @@ export const IgContentPillarSlide: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
 
   // Per-pillar insight states (keyed by pillar name)
-  const [insights, setInsights] = useState<Record<string, string>>({});
+  const [insights, setInsights] = useState<Record<string, string>>(() => {
+    if (!savedInsights) return {};
+    try {
+      return JSON.parse(savedInsights);
+    } catch {
+      return {};
+    }
+  });
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Record<string, boolean>>({});
   const [editValues, setEditValues] = useState<Record<string, string>>({});
-  const [showAiInputs, setShowAiInputs] = useState<Record<string, boolean>>({});
-  const [aiPrompts, setAiPrompts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!config.clientName || isThumbnail) return;
+
+    const cacheKey = `${config.clientName}::${config.period}`;
+
+    // Use cached data if available — avoids redundant fetches across slide offsets
+    if (_pillarCache.has(cacheKey)) {
+      const cached = _pillarCache.get(cacheKey)!;
+      setPillars(cached);
+      if (pillarOffset === 0 && cached.length > 0) {
+        onUpdate?.('_pillarSlidesNeeded', cached.length);
+      }
+      return;
+    }
+
     setLoading(true);
     setError(null);
     fetch(
@@ -541,6 +565,7 @@ export const IgContentPillarSlide: React.FC<Props> = ({
       .then((d) => {
         if (d.error) setError(d.error);
         const fetched: PillarData[] = d.pillars || [];
+        _pillarCache.set(cacheKey, fetched);
         setPillars(fetched);
         if (pillarOffset === 0 && fetched.length > 0) {
           onUpdate?.('_pillarSlidesNeeded', fetched.length);
@@ -561,22 +586,41 @@ export const IgContentPillarSlide: React.FC<Props> = ({
 
   const visiblePillars = pillars.slice(pillarOffset, pillarOffset + 2);
 
+  // Persist insights whenever they change
+  useEffect(() => {
+    onInsightsChange?.(JSON.stringify(insights));
+  }, [insights, onInsightsChange]);
+
   const handleGenerate = async (pillarName: string) => {
     const pillar = pillars.find((p) => p.pillar === pillarName);
     if (!pillar) return;
     setGenerating((g) => ({ ...g, [pillarName]: true }));
-    setShowAiInputs((a) => ({ ...a, [pillarName]: false }));
     try {
-      const avgLow = fmtN(
-        pillar.lowest.reduce((s, p) => s + (p.engagement || 0), 0) / (pillar.lowest.length || 1),
-      );
-      const avgHigh = fmtN(
-        pillar.highest.reduce((s, p) => s + (p.engagement || 0), 0) / (pillar.highest.length || 1),
-      );
-      const focus = aiPrompts[pillarName] ? `\n\nFocus: ${aiPrompts[pillarName]}` : '';
-      const prompt = `Analyze Instagram Content Pillar "${pillarName}" for ${config.clientName} in ${config.period}.\nLowest posts (${pillar.lowest.length}): avg engagement ${avgLow}\nHighest posts (${pillar.highest.length}): avg engagement ${avgHigh}${focus}\n\nGenerate 2-3 SHORT bullet points (start each with -). Each under 120 chars. Use **bold** for key numbers. Write in English.`;
-      const result = await generateGeminiContent(prompt);
-      setInsights((i) => ({ ...i, [pillarName]: result }));
+      const toSummary = (post: PostItem) => ({
+        reach: fmtN(post.reach),
+        engagement: fmtN(post.engagement),
+        er:
+          post.engagement_rate !== null && post.engagement_rate !== undefined
+            ? Math.abs(post.engagement_rate) <= 1
+              ? (post.engagement_rate * 100).toFixed(2)
+              : Number(post.engagement_rate).toFixed(2)
+            : '-',
+        saves: fmtN(post.saves),
+        shares: fmtN(post.shares),
+        comments: fmtN(post.comments),
+        format: post.format || '-',
+      });
+      const data = {
+        pillarName,
+        lowest: pillar.lowest.map(toSummary),
+        highest: pillar.highest.map(toSummary),
+      };
+      const prompt = buildContentPillarPrompt(config.clientName, config.period, data);
+      const result = await generateGeminiContent(prompt, CONTENT_PILLAR_ANALYST_SYSTEM_PROMPT);
+      setInsights((i) => ({
+        ...i,
+        [pillarName]: result,
+      }));
     } catch (err) {
       console.error('AI error', err);
     } finally {
@@ -693,22 +737,17 @@ export const IgContentPillarSlide: React.FC<Props> = ({
               isGenerating={generating[pillar.pillar] || false}
               isEditing={editing[pillar.pillar] || false}
               editValue={editValues[pillar.pillar] ?? insights[pillar.pillar] ?? ''}
-              showAiInput={showAiInputs[pillar.pillar] || false}
-              aiPrompt={aiPrompts[pillar.pillar] || ''}
               onEditStart={() => {
                 setEditValues((v) => ({ ...v, [pillar.pillar]: insights[pillar.pillar] || '' }));
                 setEditing((e) => ({ ...e, [pillar.pillar]: true }));
-                setShowAiInputs((a) => ({ ...a, [pillar.pillar]: false }));
               }}
               onEditSave={(v) => {
                 setEditValues((ev) => ({ ...ev, [pillar.pillar]: v }));
-                setInsights((i) => ({ ...i, [pillar.pillar]: v }));
+                setInsights((i) => ({
+                  ...i,
+                  [pillar.pillar]: v,
+                }));
               }}
-              onToggleAi={() => {
-                setShowAiInputs((a) => ({ ...a, [pillar.pillar]: !a[pillar.pillar] }));
-                setEditing((e) => ({ ...e, [pillar.pillar]: false }));
-              }}
-              onAiPromptChange={(v) => setAiPrompts((p) => ({ ...p, [pillar.pillar]: v }))}
               onGenerate={() => handleGenerate(pillar.pillar)}
             />
           </div>
@@ -745,6 +784,7 @@ export const IgContentPillarSlide: React.FC<Props> = ({
           totalPages={totalPages ?? 1}
           logo={config.coverDesign?.logoData}
           brandColor={config.coverDesign?.colors?.primary}
+          preparedBy={config.preparedBy}
         />
       </div>
     </div>

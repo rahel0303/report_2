@@ -45,6 +45,10 @@ next-env.d.ts
 # special files
 nul
 
+# deployment scripts with secrets
+deploy_vm.py
+setup_vm2.py
+
 .vercel
 
 .env*.local

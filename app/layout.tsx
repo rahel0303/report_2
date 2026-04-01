@@ -30,6 +30,9 @@ const nunito = Nunito({
 export const metadata: Metadata = {
   title: 'AutoMetric',
   description: 'Social Media Analytics & Report Generator',
+  icons: {
+    icon: '/autometric-logo-icon.png',
+  },
 };
 
 export default function RootLayout({

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/app/lib/db';
 import { getSession } from '@/app/lib/auth';
-import { uploadToGCS } from '@/app/lib/gcs';
 
 interface ExportHistory {
   id: number;
@@ -37,38 +36,37 @@ async function generateName(
   return count === 0 ? base : `${base}_${count + 1}`;
 }
 
-// POST — Receive PPTX + metadata, upload to GCS, save to DB
+// POST — Save export metadata to DB (no file upload)
 export async function POST(request: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const formData = await request.formData();
-    const file = formData.get('file') as File | null;
-    const brandName = formData.get('brandName') as string;
-    const period = formData.get('period') as string;
-    const slideCount = parseInt(formData.get('slideCount') as string, 10);
-    const isPartial = formData.get('isPartial') === 'true';
-    const config = JSON.parse(formData.get('config') as string || '{}');
-    const coverImageUrl = (formData.get('coverImageUrl') as string) || null;
+    const body = await request.json();
+    const { brandName, period, slideCount, isPartial, config, coverImageUrl, gcsObjectName } = body;
 
-    if (!file || !brandName || !period || isNaN(slideCount)) {
+    if (!brandName || !period || slideCount == null) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const name = await generateName(session.id as number, brandName, period, isPartial);
-
-    // Upload PPTX to GCS
-    const objectName = `exports/${session.id}/${name}.pptx`;
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await uploadToGCS(buffer, objectName);
+    const name = await generateName(session.id as number, brandName, period, isPartial ?? false);
 
     const result = await query<ExportHistory>(
       `INSERT INTO public.export_history
          (user_id, name, brand_name, period, slide_count, is_partial, config, gcs_object_name, cover_image_url)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [session.id, name, brandName, period, slideCount, isPartial, JSON.stringify(config), objectName, coverImageUrl],
+      [
+        session.id,
+        name,
+        brandName,
+        period,
+        slideCount,
+        isPartial ?? false,
+        JSON.stringify(config ?? {}),
+        gcsObjectName ?? null,
+        coverImageUrl ?? null,
+      ],
     );
 
     return NextResponse.json({ success: true, record: result[0] });

@@ -476,6 +476,7 @@ export const AllChannelSentimentSlide: React.FC<Props> = ({
           totalPages={totalPages ?? 1}
           logo={config.coverDesign?.logoData}
           brandColor={config.coverDesign?.colors?.primary}
+          preparedBy={config.preparedBy}
         />
       </div>
     </div>

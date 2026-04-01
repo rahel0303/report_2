@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/app/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 // instagram_page_9.py equivalent
 // Table: l2_socmed.ig_post_rank — Best 5 & Least 5 posts by engagement
 export async function GET(request: NextRequest) {
@@ -34,7 +36,7 @@ export async function GET(request: NextRequest) {
   const monthYear = `${mm}-${yearStr}`;
 
   try {
-    const [bestRows, leastRows] = await Promise.all([
+    const [bestRows, leastRowsRaw] = await Promise.all([
       query(
         `SELECT
            follows::numeric   AS follows,
@@ -45,8 +47,8 @@ export async function GET(request: NextRequest) {
          FROM l2_socmed.ig_post_rank
          WHERE LOWER(brand_name_display) = LOWER($1)
            AND month_year = $2
-         ORDER BY engagement::numeric DESC NULLS LAST
-         LIMIT 5`,
+           AND rank_type LIKE 'Top%'
+         ORDER BY rank ASC`,
         [brand, monthYear],
       ),
       query(
@@ -59,14 +61,18 @@ export async function GET(request: NextRequest) {
          FROM l2_socmed.ig_post_rank
          WHERE LOWER(brand_name_display) = LOWER($1)
            AND month_year = $2
-         ORDER BY engagement::numeric ASC NULLS LAST
-         LIMIT 5`,
+           AND rank_type LIKE 'Bottom%'
+         ORDER BY rank ASC`,
         [brand, monthYear],
       ),
     ]);
 
+    // Hapus URL dari least yang sudah ada di best (prioritaskan best)
+    const bestUrls = new Set((bestRows as any[]).map((r) => r.url).filter(Boolean));
+    const leastRows = (leastRowsRaw as any[]).filter((r) => !bestUrls.has(r.url));
+
     // Batch check cached thumbnails from DB (fast, no Apify call)
-    const allRows = [...(bestRows as any[]), ...(leastRows as any[])];
+    const allRows = [...bestRows, ...leastRows];
     const urls = [...new Set(allRows.map((r) => r.url).filter(Boolean))] as string[];
 
     let imageCache = new Map<string, string>();

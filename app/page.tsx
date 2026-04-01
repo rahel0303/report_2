@@ -30,6 +30,7 @@ import { getDummyDataForTemplate } from './data/dummyData';
 
 // Import components
 import { AppHeader, Toasts, ExportProgressModal } from './components/report';
+import { AppSidebar } from './components/ui/AppSidebar';
 import {
   PlaceholderSlide,
   ReportCoverVisual,
@@ -143,7 +144,6 @@ const ReportSetupInterface: React.FC = () => {
     setSlides(loadSlidesFromStorage());
   }, []);
 
-
   // Auto-save slides to localStorage whenever they change
   useEffect(() => {
     saveSlidesToStorage(slides);
@@ -154,9 +154,18 @@ const ReportSetupInterface: React.FC = () => {
   // Fetch client brands active in the selected period
   useEffect(() => {
     const MONTH_NUMS: Record<string, string> = {
-      January: '01', February: '02', March: '03', April: '04',
-      May: '05', June: '06', July: '07', August: '08',
-      September: '09', October: '10', November: '11', December: '12',
+      January: '01',
+      February: '02',
+      March: '03',
+      April: '04',
+      May: '05',
+      June: '06',
+      July: '07',
+      August: '08',
+      September: '09',
+      October: '10',
+      November: '11',
+      December: '12',
     };
     const [month, year] = config.period.split(' ');
     const monthYear = `${MONTH_NUMS[month] ?? '01'}-${year}`;
@@ -166,17 +175,23 @@ const ReportSetupInterface: React.FC = () => {
       .then((data) => {
         if (data.brands && data.brands.length > 0) {
           setBrandList(data.brands);
-          setConfig((prev) => ({
-            ...prev,
-            clientName: prev.clientName || data.brands[0].brand_name_display,
-          }));
+          setConfig((prev) => {
+            const names = data.brands.map(
+              (b: { brand_name_display: string }) => b.brand_name_display,
+            );
+            const currentValid = names.includes(prev.clientName);
+            return {
+              ...prev,
+              clientName: currentValid ? prev.clientName : data.brands[0].brand_name_display,
+            };
+          });
         } else {
           setBrandList([]);
         }
       })
       .catch(console.error)
       .finally(() => setIsBrandsLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.period]);
 
   // Re-fill clientName from already-fetched brandList whenever it becomes empty (e.g. after reset)
@@ -337,50 +352,94 @@ const ReportSetupInterface: React.FC = () => {
   };
 
   const saveExportHistory = async (blob: Blob, slideCount: number, isPartial: boolean) => {
-    // 1. Capture cover slide as image and upload to Cloudinary
-    let coverImageUrl: string | null = null;
     try {
-      const coverSlide = slides.find((s) => s.type === 'cover');
-      if (coverSlide) {
-        const el = document.querySelector(
-          `[data-slide-id="${coverSlide.id}"][data-slide-export="true"]`,
-        ) as HTMLElement | null;
-        if (el) {
-          const { toPng } = await import('html-to-image');
-          const base64 = await toPng(el, { pixelRatio: 0.4 });
-          const uploadRes = await fetch('/api/upload/cover-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ base64 }),
-          });
-          const uploadData = await uploadRes.json();
-          coverImageUrl = uploadData.url ?? null;
-        }
-      }
-    } catch (err) {
-      console.error('Cover capture failed:', err);
-    }
-
-    // 2. Upload PPTX + metadata to server (GCS)
-    try {
-      // Convert "January 2026" → "01-2026"
       const MONTH_NUMS: Record<string, string> = {
-        January: '01', February: '02', March: '03', April: '04',
-        May: '05', June: '06', July: '07', August: '08',
-        September: '09', October: '10', November: '11', December: '12',
+        January: '01',
+        February: '02',
+        March: '03',
+        April: '04',
+        May: '05',
+        June: '06',
+        July: '07',
+        August: '08',
+        September: '09',
+        October: '10',
+        November: '11',
+        December: '12',
       };
       const [mon, yr] = config.period.split(' ');
       const periodFormatted = `${MONTH_NUMS[mon] ?? '01'}-${yr}`;
 
-      const formData = new FormData();
-      formData.append('file', blob, 'export.pptx');
-      formData.append('brandName', config.clientName);
-      formData.append('period', periodFormatted);
-      formData.append('slideCount', String(slideCount));
-      formData.append('isPartial', String(isPartial));
-      formData.append('config', JSON.stringify(config));
-      if (coverImageUrl) formData.append('coverImageUrl', coverImageUrl);
-      await fetch('/api/export-history', { method: 'POST', body: formData });
+      const brandSlug = config.clientName
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_')
+        .replace(/[^a-z0-9_-]/g, '');
+
+      // 1. Get signed upload URL from server
+      let gcsObjectName: string | null = null;
+      try {
+        const params = new URLSearchParams({
+          brandSlug,
+          period: periodFormatted,
+          isPartial: String(isPartial),
+        });
+        const urlRes = await fetch(`/api/export-history/upload-url?${params}`);
+        if (urlRes.ok) {
+          const { signedUrl, objectName: confirmedName } = await urlRes.json();
+          // 2. Upload PPTX directly from browser to GCS (no Next.js body limit)
+          const uploadRes = await fetch(signedUrl, {
+            method: 'PUT',
+            headers: {
+              'Content-Type':
+                'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            },
+            body: blob,
+          });
+          if (uploadRes.ok) gcsObjectName = confirmedName;
+        }
+      } catch {
+        // GCS upload optional, continue without it
+      }
+
+      // 3. Capture cover thumbnail
+      let coverImageUrl: string | null = null;
+      try {
+        const coverSlide = slides.find((s) => s.type === 'cover');
+        if (coverSlide) {
+          const el = document.querySelector(
+            `[data-slide-id="${coverSlide.id}"][data-slide-export="true"]`,
+          ) as HTMLElement | null;
+          if (el) {
+            const { toPng } = await import('html-to-image');
+            const base64 = await toPng(el, { pixelRatio: 0.3 });
+            const uploadRes = await fetch('/api/upload/cover-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ base64 }),
+            });
+            const uploadData = await uploadRes.json();
+            coverImageUrl = uploadData.url ?? null;
+          }
+        }
+      } catch {
+        // thumbnail optional
+      }
+
+      // 4. Save metadata to DB
+      await fetch('/api/export-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brandName: config.clientName,
+          period: periodFormatted,
+          slideCount,
+          isPartial,
+          config,
+          coverImageUrl,
+          gcsObjectName,
+        }),
+      });
     } catch (err) {
       console.error('Failed to save export history:', err);
     }
@@ -390,7 +449,12 @@ const ReportSetupInterface: React.FC = () => {
     setIsDownloadOpen(false);
     setExportDone(false);
     setExportProgress({ current: 0, total: slides.length, title: '' });
-    await handleDownload(format, slides, config, setIsExporting, setShowExportToast,
+    await handleDownload(
+      format,
+      slides,
+      config,
+      setIsExporting,
+      setShowExportToast,
       (current, total, title) => setExportProgress({ current, total, title }),
       () => setExportDone(true),
       format === 'pptx' ? (blob, count) => saveExportHistory(blob, count, false) : undefined,
@@ -410,7 +474,12 @@ const ReportSetupInterface: React.FC = () => {
     if (selected.length === 0) return;
     setExportDone(false);
     setExportProgress({ current: 0, total: selected.length, title: '' });
-    await handleDownload('pptx', selected, config, setIsExporting, setShowExportToast,
+    await handleDownload(
+      'pptx',
+      selected,
+      config,
+      setIsExporting,
+      setShowExportToast,
       (current, total, title) => setExportProgress({ current, total, title }),
       () => setExportDone(true),
       (blob, count) => saveExportHistory(blob, count, true),
@@ -463,11 +532,24 @@ const ReportSetupInterface: React.FC = () => {
     // Prevent deleting the cover slide
     const slideToDelete = slides.find((s) => s.id === slideId);
     if (slideToDelete?.type === 'cover') {
-      Swal.fire({ icon: 'warning', title: 'Cannot delete cover slide', text: 'The cover slide cannot be removed.', confirmButtonColor: '#1e293b' });
+      Swal.fire({
+        icon: 'warning',
+        title: 'Cannot delete cover slide',
+        text: 'The cover slide cannot be removed.',
+        confirmButtonColor: '#1e293b',
+      });
       return;
     }
 
-    const result = await Swal.fire({ icon: 'warning', title: 'Delete slide?', text: 'This action cannot be undone.', showCancelButton: true, confirmButtonText: 'Delete', confirmButtonColor: '#dc2626', cancelButtonColor: '#94a3b8' });
+    const result = await Swal.fire({
+      icon: 'warning',
+      title: 'Delete slide?',
+      text: 'This action cannot be undone.',
+      showCancelButton: true,
+      confirmButtonText: 'Delete',
+      confirmButtonColor: '#dc2626',
+      cancelButtonColor: '#94a3b8',
+    });
     if (result.isConfirmed) {
       setSlides(slides.filter((s) => s.id !== slideId));
       if (activeSlideId === slideId) {
@@ -526,11 +608,23 @@ const ReportSetupInterface: React.FC = () => {
       if (!response.ok) throw new Error('Gagal menyimpan template');
 
       setIsSaveModalOpen(false);
-      await Swal.fire({ icon: 'success', title: 'Template Saved!', text: `"${name}" berhasil disimpan.`, confirmButtonColor: '#1e293b', timer: 2000, showConfirmButton: false });
+      await Swal.fire({
+        icon: 'success',
+        title: 'Template Saved!',
+        text: `"${name}" berhasil disimpan.`,
+        confirmButtonColor: '#1e293b',
+        timer: 2000,
+        showConfirmButton: false,
+      });
       resetToInitialState();
     } catch (error) {
       console.error('Save template error:', error);
-      Swal.fire({ icon: 'error', title: 'Gagal!', text: 'Gagal menyimpan template.', confirmButtonColor: '#1e293b' });
+      Swal.fire({
+        icon: 'error',
+        title: 'Gagal!',
+        text: 'Gagal menyimpan template.',
+        confirmButtonColor: '#1e293b',
+      });
     }
   };
 
@@ -550,16 +644,36 @@ const ReportSetupInterface: React.FC = () => {
       if (!response.ok) throw new Error('Gagal menyimpan report');
 
       setIsSaveModalOpen(false);
-      await Swal.fire({ icon: 'success', title: 'Report Saved!', text: `"${name}" berhasil disimpan.`, confirmButtonColor: '#1e293b', timer: 2000, showConfirmButton: false });
+      await Swal.fire({
+        icon: 'success',
+        title: 'Report Saved!',
+        text: `"${name}" berhasil disimpan.`,
+        confirmButtonColor: '#1e293b',
+        timer: 2000,
+        showConfirmButton: false,
+      });
       resetToInitialState();
     } catch (error) {
       console.error('Save report error:', error);
-      Swal.fire({ icon: 'error', title: 'Gagal!', text: 'Gagal menyimpan report.', confirmButtonColor: '#1e293b' });
+      Swal.fire({
+        icon: 'error',
+        title: 'Gagal!',
+        text: 'Gagal menyimpan report.',
+        confirmButtonColor: '#1e293b',
+      });
     }
   };
 
   const handleLoadTemplate = async (template: any) => {
-    const res = await Swal.fire({ icon: 'question', title: 'Load Template?', text: 'Perubahan yang belum disimpan akan hilang.', showCancelButton: true, confirmButtonText: 'Load', confirmButtonColor: '#1e293b', cancelButtonColor: '#94a3b8' });
+    const res = await Swal.fire({
+      icon: 'question',
+      title: 'Load Template?',
+      text: 'Perubahan yang belum disimpan akan hilang.',
+      showCancelButton: true,
+      confirmButtonText: 'Load',
+      confirmButtonColor: '#1e293b',
+      cancelButtonColor: '#94a3b8',
+    });
     if (res.isConfirmed) {
       console.log('🔵 Loading template structure:', template);
       console.log('🔵 Current selected brand:', config.clientName);
@@ -653,7 +767,15 @@ const ReportSetupInterface: React.FC = () => {
   };
 
   const handleLoadReport = async (report: any) => {
-    const res2 = await Swal.fire({ icon: 'question', title: 'Load Report?', text: 'Perubahan yang belum disimpan akan hilang.', showCancelButton: true, confirmButtonText: 'Load', confirmButtonColor: '#1e293b', cancelButtonColor: '#94a3b8' });
+    const res2 = await Swal.fire({
+      icon: 'question',
+      title: 'Load Report?',
+      text: 'Perubahan yang belum disimpan akan hilang.',
+      showCancelButton: true,
+      confirmButtonText: 'Load',
+      confirmButtonColor: '#1e293b',
+      cancelButtonColor: '#94a3b8',
+    });
     if (res2.isConfirmed) {
       setConfig(report.config);
       setSlides(report.slides);
@@ -903,6 +1025,7 @@ const ReportSetupInterface: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800 pb-20 relative">
+      <AppSidebar mode="overlay" />
       <AppHeader currentStep={currentStep} />
 
       {/* EXPORT PROGRESS MODAL */}
@@ -1059,11 +1182,15 @@ const ReportSetupInterface: React.FC = () => {
                         </label>
                         <select
                           value={config.period}
-                          onChange={(e) => setConfig({ ...config, period: e.target.value, reportType: 'Monthly' })}
+                          onChange={(e) =>
+                            setConfig({ ...config, period: e.target.value, reportType: 'Monthly' })
+                          }
                           className="w-full border p-2 rounded text-sm bg-white"
                         >
                           {getPeriodOptions('Monthly').map((p) => (
-                            <option key={p} value={p}>{p}</option>
+                            <option key={p} value={p}>
+                              {p}
+                            </option>
                           ))}
                         </select>
                       </div>
@@ -1216,11 +1343,26 @@ const ReportSetupInterface: React.FC = () => {
                   </button>
                   <button
                     onClick={async () => {
-                      const r = await Swal.fire({ icon: 'warning', title: 'Clear All Data?', text: 'This cannot be undone.', showCancelButton: true, confirmButtonText: 'Clear', confirmButtonColor: '#dc2626', cancelButtonColor: '#94a3b8' });
+                      const r = await Swal.fire({
+                        icon: 'warning',
+                        title: 'Clear All Data?',
+                        text: 'This cannot be undone.',
+                        showCancelButton: true,
+                        confirmButtonText: 'Clear',
+                        confirmButtonColor: '#dc2626',
+                        cancelButtonColor: '#94a3b8',
+                      });
                       if (r.isConfirmed) {
                         clearAllStorage();
                         resetToInitialState();
-                        Swal.fire({ icon: 'success', title: 'Cleared!', text: 'All data has been cleared.', confirmButtonColor: '#1e293b', timer: 1500, showConfirmButton: false });
+                        Swal.fire({
+                          icon: 'success',
+                          title: 'Cleared!',
+                          text: 'All data has been cleared.',
+                          confirmButtonColor: '#1e293b',
+                          timer: 1500,
+                          showConfirmButton: false,
+                        });
                       }
                     }}
                     className="w-full py-2 bg-white text-red-600 border border-red-200 font-medium rounded-lg hover:bg-red-50 transition flex items-center justify-center gap-2 text-xs"
@@ -1658,7 +1800,16 @@ const ReportSetupInterface: React.FC = () => {
       </main>
 
       {/* Hidden slides for export */}
-      <div style={{ position: 'fixed', left: '-99999px', top: '-99999px', overflow: 'hidden', pointerEvents: 'none', zIndex: -1 }}>
+      <div
+        style={{
+          position: 'fixed',
+          left: '-99999px',
+          top: '-99999px',
+          overflow: 'hidden',
+          pointerEvents: 'none',
+          zIndex: -1,
+        }}
+      >
         {slides.map((slide, index) => {
           const currentPage = index + 1;
           const totalPages = slides.length;
@@ -1742,6 +1893,7 @@ const ReportSetupInterface: React.FC = () => {
                     isThumbnail={false}
                     currentPage={currentPage}
                     totalPages={totalPages}
+                    savedInsight={slide.content?.insight}
                   />
                 ) : null
               ) : slide.type === 'ic_all_sentiment' ? (
@@ -1800,6 +1952,7 @@ const ReportSetupInterface: React.FC = () => {
                     isThumbnail={false}
                     currentPage={currentPage}
                     totalPages={totalPages}
+                    savedInsight={slide.content?.insight}
                   />
                 ) : null
               ) : slide.type === 'ic_ig_content_pillar' ? (
@@ -1810,6 +1963,7 @@ const ReportSetupInterface: React.FC = () => {
                     currentPage={currentPage}
                     totalPages={totalPages}
                     pillarOffset={slide.content?.pillarOffset ?? 0}
+                    savedInsights={slide.content?.pillarInsights}
                   />
                 ) : null
               ) : slide.type === 'ic_ig_tagged_post' ? (
@@ -1828,6 +1982,7 @@ const ReportSetupInterface: React.FC = () => {
                     isThumbnail={false}
                     currentPage={currentPage}
                     totalPages={totalPages}
+                    savedInsight={slide.content?.insight}
                   />
                 ) : null
               ) : slide.type === 'ic_tt_organic_best_least' ? (
@@ -1838,6 +1993,7 @@ const ReportSetupInterface: React.FC = () => {
                     isThumbnail={false}
                     currentPage={currentPage}
                     totalPages={totalPages}
+                    savedInsight={slide.content?.insight}
                   />
                 ) : null
               ) : slide.type === 'ic_tt_paid_best_least' ? (
@@ -1848,6 +2004,7 @@ const ReportSetupInterface: React.FC = () => {
                     isThumbnail={false}
                     currentPage={currentPage}
                     totalPages={totalPages}
+                    savedInsight={slide.content?.insight}
                   />
                 ) : null
               ) : slide.type === 'ic_tt_content_pillar' ? (
@@ -1857,6 +2014,7 @@ const ReportSetupInterface: React.FC = () => {
                     isThumbnail={false}
                     currentPage={currentPage}
                     totalPages={totalPages}
+                    savedInsights={slide.content?.pillarInsights}
                   />
                 ) : null
               ) : slide.type === 'ic_ig_cp_eng_aon' ? (
@@ -1906,6 +2064,7 @@ const ReportSetupInterface: React.FC = () => {
                     isThumbnail={false}
                     currentPage={currentPage}
                     totalPages={totalPages}
+                    savedInsight={slide.content?.insight}
                   />
                 ) : null
               ) : slide.type === 'ic_tw_best_least' ? (
@@ -1915,6 +2074,7 @@ const ReportSetupInterface: React.FC = () => {
                     isThumbnail={false}
                     currentPage={currentPage}
                     totalPages={totalPages}
+                    savedInsight={slide.content?.insight}
                   />
                 ) : null
               ) : slide.type === 'ic_tw_content' ? (
@@ -1924,6 +2084,7 @@ const ReportSetupInterface: React.FC = () => {
                     isThumbnail={false}
                     currentPage={currentPage}
                     totalPages={totalPages}
+                    savedInsight={slide.content?.insight}
                   />
                 ) : null
               ) : slide.type === 'ic_fb_growth' ? (
@@ -1933,6 +2094,7 @@ const ReportSetupInterface: React.FC = () => {
                     isThumbnail={false}
                     currentPage={currentPage}
                     totalPages={totalPages}
+                    savedInsight={slide.content?.insight}
                   />
                 ) : null
               ) : slide.type === 'ic_comp_overview' ? (
@@ -1942,6 +2104,7 @@ const ReportSetupInterface: React.FC = () => {
                     isThumbnail={false}
                     currentPage={currentPage}
                     totalPages={totalPages}
+                    savedInsight={slide.content?.insight}
                   />
                 ) : null
               ) : slide.type === 'ic_comp_detail' ? (
@@ -1952,6 +2115,7 @@ const ReportSetupInterface: React.FC = () => {
                     isThumbnail={false}
                     currentPage={currentPage}
                     totalPages={totalPages}
+                    savedInsight={slide.content?.insight}
                   />
                 ) : null
               ) : slide.type === 'ic_comp_ig_focus' ? (
@@ -1962,6 +2126,7 @@ const ReportSetupInterface: React.FC = () => {
                     isThumbnail={false}
                     currentPage={currentPage}
                     totalPages={totalPages}
+                    savedInsight={slide.content?.insight}
                   />
                 ) : null
               ) : slide.type === 'thank_you' ? (
@@ -2005,7 +2170,9 @@ const ReportSetupInterface: React.FC = () => {
             <div className="grid grid-cols-3 gap-4">
               {/* Start from scratch - Coming Soon */}
               <div className="relative p-6 border-2 border-slate-200 rounded-xl opacity-50 cursor-not-allowed">
-                <span className="absolute top-2 right-2 text-[10px] font-bold bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-wide">Coming Soon</span>
+                <span className="absolute top-2 right-2 text-[10px] font-bold bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-wide">
+                  Coming Soon
+                </span>
                 <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
                   <Plus size={24} className="text-blue-600" />
                 </div>
@@ -2268,7 +2435,9 @@ const ReportSetupInterface: React.FC = () => {
 
               {/* Load from template - Coming Soon */}
               <div className="relative p-6 border-2 border-slate-200 rounded-xl opacity-50 cursor-not-allowed">
-                <span className="absolute top-2 right-2 text-[10px] font-bold bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-wide">Coming Soon</span>
+                <span className="absolute top-2 right-2 text-[10px] font-bold bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-wide">
+                  Coming Soon
+                </span>
                 <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
                   <FileText size={24} className="text-purple-600" />
                 </div>
@@ -2296,13 +2465,17 @@ const ReportSetupInterface: React.FC = () => {
 
             <div className="space-y-3">
               <div className="relative w-full p-4 border-2 border-slate-200 rounded-lg opacity-50 cursor-not-allowed text-left">
-                <span className="absolute top-2 right-2 text-[10px] font-bold bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-wide">Coming Soon</span>
+                <span className="absolute top-2 right-2 text-[10px] font-bold bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-wide">
+                  Coming Soon
+                </span>
                 <div className="font-bold text-slate-900">Save as Template</div>
                 <div className="text-sm text-slate-600">Save structure only (reusable)</div>
               </div>
 
               <div className="relative w-full p-4 border-2 border-slate-200 rounded-lg opacity-50 cursor-not-allowed text-left">
-                <span className="absolute top-2 right-2 text-[10px] font-bold bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-wide">Coming Soon</span>
+                <span className="absolute top-2 right-2 text-[10px] font-bold bg-slate-200 text-slate-500 px-2 py-0.5 rounded-full uppercase tracking-wide">
+                  Coming Soon
+                </span>
                 <div className="font-bold text-slate-900">Save Report</div>
                 <div className="text-sm text-slate-600">Save with all data</div>
               </div>
@@ -2331,8 +2504,8 @@ const ReportSetupInterface: React.FC = () => {
 
       {/* DEBUG EXPORT MODAL */}
       {showDebugModal && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-2xl shadow-2xl w-[480px] max-h-[80vh] flex flex-col overflow-hidden">
+        <div className="fixed inset-0 z-9999 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-120 max-h-[80vh] flex flex-col overflow-hidden">
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
               <div className="flex items-center gap-2">

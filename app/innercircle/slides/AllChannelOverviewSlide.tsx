@@ -1,12 +1,17 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Calendar, Users, Sparkles, Loader2, Send } from 'lucide-react';
+import { Calendar, Users, Sparkles, Loader2 } from 'lucide-react';
 import { ReportConfig } from '@/app/types';
 import { SlideFooter } from '@/app/components/ui/SlideFooter';
 import { generateLayoutTheme } from '@/app/utils/themeStyles';
 import { generateGeminiContent } from '@/app/utils/api';
-import { renderTextWithHighlights } from '@/app/utils/helpers';
+import {
+  ANALYST_AGENT_SYSTEM_PROMPT,
+  buildAllChannelOverviewPrompt,
+  parseInsightOutput,
+  type ParsedInsight,
+} from '@/app/innercircle/prompts/allChannelOverviewPrompt';
 
 interface ChannelRow {
   channel: string;
@@ -27,6 +32,8 @@ interface Props {
   isThumbnail?: boolean;
   currentPage?: number;
   totalPages?: number;
+  savedInsight?: string;
+  onInsightChange?: (value: string) => void;
 }
 
 const CHANNEL_COLOR: Record<string, string> = {
@@ -38,12 +45,11 @@ const CHANNEL_COLOR: Record<string, string> = {
 
 const CHANNEL_ORDER = ['Instagram', 'TikTok', 'Facebook', 'Twitter'];
 
+
 function fmt(val: number | null): string {
   if (val === null || val === undefined) return '-';
   const num = Number(val);
   if (isNaN(num)) return '-';
-  if (Math.abs(num) >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
-  if (Math.abs(num) >= 1_000) return (num / 1_000).toFixed(1) + 'K';
   return num.toLocaleString();
 }
 
@@ -61,7 +67,7 @@ const MetricCell: React.FC<{ base: number | null; pct: number | null }> = ({ bas
   const pillBg = positive === true ? '#dcfce7' : positive === false ? '#fee2e2' : '#f1f5f9';
   const pillColor = positive === true ? '#15803d' : positive === false ? '#b91c1c' : '#94a3b8';
   return (
-    <td className="py-2.5 px-2 text-center align-middle">
+    <td className="py-1.5 px-2 text-center align-middle">
       <div className="font-semibold text-[11px] text-slate-800 leading-none">{fmt(base)}</div>
       {text !== '-' && (
         <div className="flex justify-center mt-1">
@@ -77,23 +83,80 @@ const MetricCell: React.FC<{ base: number | null; pct: number | null }> = ({ bas
   );
 };
 
+// ─── inline bold renderer (no block wrapper) ─────────────────
+const renderBoldInline = (text: string, color: string) =>
+  text.split(/(\*\*.*?\*\*)/g).map((part, i) =>
+    part.startsWith('**') && part.endsWith('**')
+      ? <span key={i} className="font-bold" style={{ color }}>{part.slice(2, -2)}</span>
+      : <span key={i}>{part}</span>,
+  );
+
+// ─── InsightView ─────────────────────────────────────────────
+const InsightView: React.FC<{
+  raw: string;
+  isDark: boolean;
+  colorPrimary: string;
+  isThumbnail: boolean;
+  onEdit: () => void;
+}> = ({ raw, isDark, colorPrimary, isThumbnail, onEdit }) => {
+  const parsed: ParsedInsight = React.useMemo(() => parseInsightOutput(raw), [raw]);
+  const bodyColor = isDark ? 'text-slate-300' : 'text-slate-600';
+  const labelColor = isDark ? 'text-slate-200' : 'text-slate-700';
+
+  return (
+    <div
+      data-ic-insight
+      data-insight-raw={raw}
+      className="flex flex-col gap-2 w-full min-w-0 overflow-hidden"
+      style={{ cursor: isThumbnail ? 'default' : 'pointer' }}
+      onClick={() => { if (!isThumbnail) onEdit(); }}
+    >
+      {parsed.analysis && (
+        <div
+          className={`text-[11px] leading-relaxed font-medium break-words ${bodyColor}`}
+          style={{ overflowWrap: 'break-word', wordBreak: 'break-word' }}
+        >
+          {renderBoldInline(parsed.analysis, colorPrimary)}
+        </div>
+      )}
+
+      {parsed.recommendations.length > 0 && (
+        <div className="flex flex-col gap-1 w-full min-w-0">
+          {parsed.recommendations.map((rec) => (
+            <div
+              key={rec.type}
+              className={`text-[10px] leading-snug break-words ${bodyColor}`}
+              style={{ overflowWrap: 'break-word', wordBreak: 'break-word' }}
+            >
+              <span className={`font-bold ${labelColor}`}>• {rec.type}: </span>
+              {renderBoldInline(rec.text, colorPrimary)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+
 export const AllChannelOverviewSlide: React.FC<Props> = ({
   config,
   isThumbnail = false,
   currentPage,
   totalPages,
+  savedInsight,
+  onInsightChange,
 }) => {
   const [rows, setRows] = useState<ChannelRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Insight state
-  const [insight, setInsight] = useState('');
+  const [insight, setInsight] = useState(savedInsight || '');
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [showAiInput, setShowAiInput] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState('');
 
   useEffect(() => {
     if (!config.clientName || isThumbnail) return;
@@ -134,24 +197,26 @@ export const AllChannelOverviewSlide: React.FC<Props> = ({
     { label: 'Total Engagement', w: '21%', align: 'center' as const },
   ];
 
-  const handleGenerateAI = async (e?: React.FormEvent) => {
-    e?.preventDefault();
+  const handleGenerateAI = async () => {
     setIsGenerating(true);
-    setShowAiInput(false);
     try {
-      const contextData = rows.map((r) => ({
+      const channelData = rows.map((r) => ({
         channel: r.channel,
         followers: fmt(r.followers),
-        monthlyGrowth: fmt(r.monthly_growth),
-        monthlyGrowthPct: fmtPct(r.monthly_growth_pct).text,
-        channelReach: fmt(r.channel_reach),
+        ytd_growth: fmt(r.ytd_growth),
+        monthly_growth: fmt(r.monthly_growth),
+        monthly_growth_pct: fmtPct(r.monthly_growth_pct).text,
+        channel_reach: fmt(r.channel_reach),
+        channel_reach_pct: fmtPct(r.channel_reach_pct).text,
+        profile_visit: fmt(r.profile_visit),
+        profile_visit_pct: fmtPct(r.profile_visit_pct).text,
         engagement: fmt(r.engagement),
+        engagement_pct: fmtPct(r.engagement_pct).text,
       }));
-      const focusNote = aiPrompt ? `\n\nFocus: ${aiPrompt}` : '';
-      const prompt = `Analyze all-channel social media performance for ${config.clientName} in ${config.period}:\n${JSON.stringify(contextData, null, 2)}${focusNote}\n\nGenerate 3 SHORT bullet points (start each with -). Each point MUST be under 150 characters. Use **bold** for key numbers/percentages. Focus on cross-channel comparison and notable trends. Write in English.`;
-      const result = await generateGeminiContent(prompt);
+      const prompt = buildAllChannelOverviewPrompt(config.clientName, config.period, channelData);
+      const result = await generateGeminiContent(prompt, ANALYST_AGENT_SYSTEM_PROMPT);
       setInsight(result);
-      setAiPrompt('');
+      onInsightChange?.(result);
     } catch (err) {
       console.error('AI generation error:', err);
     } finally {
@@ -161,6 +226,7 @@ export const AllChannelOverviewSlide: React.FC<Props> = ({
 
   const handleSaveEdit = () => {
     setInsight(editValue);
+    onInsightChange?.(editValue);
     setIsEditing(false);
   };
 
@@ -242,9 +308,10 @@ export const AllChannelOverviewSlide: React.FC<Props> = ({
 
       {/* Body */}
       <div className="flex-1 flex flex-col p-4 pt-3 gap-3 overflow-hidden min-h-0">
-        {/* Table card — shrink-0: fits content, no empty space below */}
+        {/* Table card — fixed height, analysis panel gets the rest */}
         <div
           className="shrink-0 rounded-xl border overflow-hidden"
+          style={{ maxHeight: '42%' }}
           style={{
             backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#ffffff',
             boxShadow: theme.cardShadow,
@@ -283,7 +350,7 @@ export const AllChannelOverviewSlide: React.FC<Props> = ({
                   {COLS.map((c) => (
                     <th
                       key={c.label}
-                      className={`py-2 px-2 font-bold uppercase tracking-wide border-b text-[9px] ${isDark ? 'text-slate-300 border-white/10' : 'text-slate-500 border-slate-200'}`}
+                      className={`py-1.5 px-2 font-bold uppercase tracking-wide border-b text-[9px] ${isDark ? 'text-slate-300 border-white/10' : 'text-slate-500 border-slate-200'}`}
                       style={{ width: c.w, textAlign: c.align }}
                     >
                       {c.label}
@@ -307,7 +374,7 @@ export const AllChannelOverviewSlide: React.FC<Props> = ({
                             : 'bg-slate-50/70'
                       }
                     >
-                      <td className="py-2.5 px-2 align-middle">
+                      <td className="py-1.5 px-2 align-middle">
                         <div className="flex items-center gap-2">
                           <div
                             className="w-2.5 h-2.5 rounded-full shrink-0"
@@ -321,12 +388,12 @@ export const AllChannelOverviewSlide: React.FC<Props> = ({
                         </div>
                       </td>
                       <td
-                        className={`py-2.5 px-2 text-center align-middle font-semibold text-[11px] ${isDark ? 'text-slate-200' : 'text-slate-800'}`}
+                        className={`py-1.5 px-2 text-center align-middle font-semibold text-[11px] ${isDark ? 'text-slate-200' : 'text-slate-800'}`}
                       >
                         {fmt(row.followers)}
                       </td>
                       <td
-                        className={`py-2.5 px-2 text-center align-middle text-[11px] ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
+                        className={`py-1.5 px-2 text-center align-middle text-[11px] ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
                       >
                         {fmt(row.ytd_growth)}
                       </td>
@@ -371,7 +438,6 @@ export const AllChannelOverviewSlide: React.FC<Props> = ({
                     onClick={() => {
                       setEditValue(insight);
                       setIsEditing(true);
-                      setShowAiInput(false);
                     }}
                     className={`text-[9px] font-medium px-2 py-0.5 rounded-full border transition-all ${
                       isDark
@@ -383,66 +449,28 @@ export const AllChannelOverviewSlide: React.FC<Props> = ({
                   </button>
                 )}
                 <button
-                  onClick={() => {
-                    setShowAiInput(!showAiInput);
-                    setIsEditing(false);
-                  }}
-                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium border transition-all ${
-                    showAiInput
-                      ? isDark
-                        ? 'bg-indigo-500/30 text-indigo-300 border-indigo-500/50'
-                        : 'bg-indigo-100 text-indigo-700 border-indigo-200'
-                      : isDark
-                        ? 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10'
-                        : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100'
+                  onClick={handleGenerateAI}
+                  disabled={isGenerating || rows.length === 0}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium border transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                    isDark
+                      ? 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10'
+                      : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100'
                   }`}
                 >
-                  <Sparkles size={9} />
-                  <span>{showAiInput ? 'Close AI' : 'AI Generate'}</span>
+                  {isGenerating ? (
+                    <Loader2 size={9} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={9} />
+                  )}
+                  <span>{isGenerating ? 'Generating…' : 'AI Generate'}</span>
                 </button>
               </div>
             )}
           </div>
 
-          {/* AI prompt input row */}
-          {showAiInput && !isThumbnail && (
-            <div
-              className="px-4 py-2 border-b shrink-0"
-              style={{
-                backgroundColor: isDark ? 'rgba(99,102,241,0.1)' : '#eef2ff',
-                borderColor: isDark ? 'rgba(99,102,241,0.3)' : '#c7d2fe',
-              }}
-            >
-              <form onSubmit={handleGenerateAI} className="flex gap-2">
-                <input
-                  type="text"
-                  value={aiPrompt}
-                  onChange={(e) => setAiPrompt(e.target.value)}
-                  placeholder="Optional: describe what to focus on — e.g. 'highlight channel with highest growth' (max 150 chars)"
-                  maxLength={150}
-                  className={`flex-1 text-[10px] px-2 py-1.5 rounded border focus:outline-none focus:border-indigo-400 placeholder:opacity-50 ${
-                    isDark
-                      ? 'bg-white/10 border-white/10 text-white'
-                      : 'bg-white border-indigo-200 text-slate-700'
-                  }`}
-                />
-                <button
-                  type="submit"
-                  disabled={isGenerating}
-                  className="bg-indigo-600 text-white px-3 rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center justify-center"
-                >
-                  {isGenerating ? (
-                    <Loader2 size={10} className="animate-spin" />
-                  ) : (
-                    <Send size={10} />
-                  )}
-                </button>
-              </form>
-            </div>
-          )}
 
           {/* Content area */}
-          <div className="flex-1 overflow-auto p-4 min-h-0">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 min-h-0 min-w-0">
             {isGenerating ? (
               <div className="flex flex-col items-center justify-center h-full gap-2 opacity-70">
                 <Sparkles size={20} className="text-indigo-500 animate-spin" />
@@ -482,42 +510,22 @@ export const AllChannelOverviewSlide: React.FC<Props> = ({
                 </div>
               </div>
             ) : insight ? (
-              <div
-                data-ic-insight
-                data-insight-raw={insight}
-                className={`text-[11px] leading-relaxed font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
-                style={{ cursor: isThumbnail ? 'default' : 'pointer' }}
-                onClick={() => {
-                  if (!isThumbnail) {
-                    setEditValue(insight);
-                    setIsEditing(true);
-                  }
-                }}
-              >
-                {renderTextWithHighlights(insight, isDark, colorPrimary)}
-              </div>
-            ) : !isThumbnail ? (
-              <div
-                className="flex flex-col items-center justify-center h-full gap-3 cursor-pointer group"
-                onClick={() => {
-                  setEditValue('');
+              <InsightView
+                raw={insight}
+                isDark={isDark}
+                colorPrimary={colorPrimary}
+                isThumbnail={isThumbnail}
+                onEdit={() => {
+                  setEditValue(insight);
                   setIsEditing(true);
                 }}
+              />
+            ) : !isThumbnail ? (
+              <div
+                className="flex items-center justify-center h-full cursor-pointer group"
+                onClick={() => { setEditValue(''); setIsEditing(true); }}
               >
-                <div
-                  className={`w-10 h-10 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform ${
-                    isDark ? 'bg-white/10' : 'bg-slate-100'
-                  }`}
-                >
-                  <Sparkles size={18} className={isDark ? 'text-slate-400' : 'text-slate-400'} />
-                </div>
-                <p
-                  className={`text-[10px] font-medium text-center ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
-                >
-                  Click to type manually
-                  <br />
-                  or use <span className="text-indigo-500 font-semibold">AI Generate</span> above
-                </p>
+                <Sparkles size={16} className={`group-hover:scale-110 transition-transform ${isDark ? 'text-slate-600' : 'text-slate-300'}`} />
               </div>
             ) : (
               <div className={`text-[10px] italic ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -537,6 +545,7 @@ export const AllChannelOverviewSlide: React.FC<Props> = ({
           totalPages={totalPages ?? 1}
           logo={config.coverDesign?.logoData}
           brandColor={config.coverDesign?.colors?.primary}
+          preparedBy={config.preparedBy}
         />
       </div>
     </div>

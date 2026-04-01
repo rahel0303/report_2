@@ -7,6 +7,7 @@ interface SlideFooterProps {
   totalPages: number;
   logo?: string;
   brandColor?: string;
+  preparedBy?: string;
 }
 
 // Helper to convert hex to RGB
@@ -24,6 +25,7 @@ export const SlideFooter: React.FC<SlideFooterProps> = ({
   totalPages,
   logo,
   brandColor = '#3B82F6',
+  preparedBy = '',
 }) => {
   const rgb = hexToRgb(brandColor);
 
@@ -66,20 +68,14 @@ export const SlideFooter: React.FC<SlideFooterProps> = ({
           </div>
         </div>
 
-        {/* Center - Powered by Sekata */}
+        {/* Center - Prepared By */}
         <div className="flex-1 flex justify-center">
-          <div className="text-xs text-gray-500 flex items-center gap-1.5">
-            <span>Powered by</span>
-            <span
-              className="font-bold px-2 py-0.5 rounded"
-              style={{
-                color: brandColor,
-                background: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.1)`,
-              }}
-            >
-              Sekata
-            </span>
-          </div>
+          {preparedBy && (
+            <div className="flex flex-col items-center gap-0.5">
+              <span className="text-[8px] text-gray-400">Prepared by</span>
+              <span className="text-[9px] font-semibold text-gray-600">{preparedBy}</span>
+            </div>
+          )}
         </div>
 
         {/* Right side - Page Number */}

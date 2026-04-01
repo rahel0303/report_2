@@ -49,7 +49,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
   const theme = generateLayoutTheme(
     config.coverDesign?.colors,
     config.theme.brandColor,
-    contentMode
+    contentMode,
   );
   const isDark = contentMode === 'dark';
 
@@ -339,7 +339,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
     >
       {/* Decorative accent line at top */}
       <div
-        className="absolute top-0 left-0 right-0 h-[3px] z-10"
+        className="absolute top-0 left-0 right-0 h-0.75 z-10"
         style={{ background: styles.accentLine }}
       />
 
@@ -399,11 +399,15 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
           <div
             data-dashboard-chart
             className={`flex-[1.85] rounded-xl border p-3 flex flex-col min-w-0 relative overflow-hidden ${styles.border}`}
-            style={{ backgroundColor: styles.cardBg, boxShadow: styles.cardShadow, borderColor: styles.borderColor }}
+            style={{
+              backgroundColor: styles.cardBg,
+              boxShadow: styles.cardShadow,
+              borderColor: styles.borderColor,
+            }}
           >
             {/* Card accent line */}
             <div
-              className="absolute top-0 left-4 right-4 h-[2px] rounded-full"
+              className="absolute top-0 left-4 right-4 h-0.5 rounded-full"
               style={{ background: styles.accentLine }}
             />
             <div className="flex justify-between items-center mb-1">
@@ -584,7 +588,10 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
               </div>
             )}
 
-            <div data-dashboard-text="takeaways" className="flex-1 flex flex-col justify-center overflow-hidden">
+            <div
+              data-dashboard-text="takeaways"
+              className="flex-1 flex flex-col justify-center overflow-hidden"
+            >
               {isTyping ? (
                 <div className="flex flex-col items-center justify-center h-full gap-2 opacity-70">
                   <Sparkles size={20} className="text-indigo-500 animate-spin" />
@@ -609,7 +616,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
                       {takeaways.map((item, idx) => (
                         <li key={idx} className="flex gap-2 items-start">
                           <span
-                            className={`${fontSize.insightText} mt-[2px]`}
+                            className={`${fontSize.insightText} mt-0.5`}
                             style={{ color: config.theme.colors[4] }}
                           >
                             •
@@ -645,7 +652,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
                   {columns.map((col) => (
                     <th
                       key={col.key}
-                      className={`px-1 py-2 ${fontSize.tableHeaderSmall} font-bold uppercase tracking-tighter border-b border-r last:border-r-0 leading-tight break-words w-[7%] ${styles.border} ${styles.textMuted}`}
+                      className={`px-1 py-2 ${fontSize.tableHeaderSmall} font-bold uppercase tracking-tighter border-b border-r last:border-r-0 leading-tight wrap-break-word w-[7%] ${styles.border} ${styles.textMuted}`}
                     >
                       {col.label}
                     </th>
@@ -729,6 +736,7 @@ export const InstagramDashboardSlide: React.FC<InstagramDashboardSlideProps> = (
           totalPages={totalPages}
           logo={config.coverDesign?.logoData}
           brandColor={theme.colors.primary}
+          preparedBy={config.preparedBy}
         />
       )}
     </div>

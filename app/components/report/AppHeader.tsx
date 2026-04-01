@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { MonitorPlay, LogOut, ChevronLeft } from 'lucide-react';
+import { LogOut, ChevronLeft } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 interface AppHeaderProps {
@@ -29,12 +29,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ currentStep }) => {
             </button>
           )}
           <div className="flex items-center gap-2">
-            <div className="bg-slate-900 text-white p-1.5 rounded-lg">
-              <MonitorPlay size={20} />
-            </div>
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-              AutoMetric
-            </h1>
+            <img src="/auometric-logo-long.png" alt="AutoMetric" className="h-25 w-auto object-contain" />
           </div>
         </div>
         <div className="flex items-center gap-3">

@@ -19,14 +19,12 @@ export const generateGeminiContent = async (
     // Initialize GoogleGenerativeAI with API key
     const genAI = new GoogleGenerativeAI(apiKey);
 
-    // Combine systemInstruction with prompt
-    const fullPrompt = systemInstruction
-      ? `${systemInstruction}\n\nUser request: ${prompt}`
-      : prompt;
-
-    // Generate content using the SDK
-    const generativeModel = genAI.getGenerativeModel({ model });
-    const result = await generativeModel.generateContent(fullPrompt);
+    // Use native systemInstruction when provided (proper Gemini persona/constraint layer)
+    const generativeModel = genAI.getGenerativeModel({
+      model,
+      ...(systemInstruction ? { systemInstruction } : {}),
+    });
+    const result = await generativeModel.generateContent(prompt);
     const response = await result.response;
 
     return response.text() || 'Analysis unavailable.';

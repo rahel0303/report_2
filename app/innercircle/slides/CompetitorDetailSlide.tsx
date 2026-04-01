@@ -1,11 +1,17 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { ExternalLink, Loader2 } from 'lucide-react';
+import { ExternalLink, Loader2, Sparkles } from 'lucide-react';
 import { ReportConfig } from '@/app/types';
 import { SlideFooter } from '@/app/components/ui/SlideFooter';
 import { ChannelBadge } from '@/app/components/ui';
 import { generateLayoutTheme } from '@/app/utils/themeStyles';
+import { generateGeminiContent } from '@/app/utils/api';
+import {
+  COMP_DETAIL_ANALYST_SYSTEM_PROMPT,
+  buildCompDetailPrompt,
+  parseCompDetailInsight,
+} from '@/app/innercircle/prompts/compDetailPrompt';
 
 // competitor_page_detail.py equivalent
 // Top 3 posts per channel (IG, TikTok, Twitter / X) for one competitor
@@ -35,13 +41,13 @@ interface Props {
   currentPage?: number;
   totalPages?: number;
   onUpdate?: (key: string, value: unknown) => void;
+  savedInsight?: string;
+  onInsightChange?: (value: string) => void;
 }
 
 function fmtN(v: number | null): string {
   if (v === null || isNaN(v)) return '-';
-  if (Math.abs(v) >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M';
-  if (Math.abs(v) >= 1_000) return (v / 1_000).toFixed(1) + 'K';
-  return Math.round(v).toLocaleString();
+  return v.toLocaleString();
 }
 
 // ── Single post card ────────────────────────────────────────────────────────
@@ -55,7 +61,17 @@ const PostCard: React.FC<{
   isDark: boolean;
   border: string;
   cardBg: string;
-}> = ({ rank, badgeColor, metrics, url, imageUrl: initialImageUrl, channel, isDark, border, cardBg }) => {
+}> = ({
+  rank,
+  badgeColor,
+  metrics,
+  url,
+  imageUrl: initialImageUrl,
+  channel,
+  isDark,
+  border,
+  cardBg,
+}) => {
   const [imageUrl, setImageUrl] = useState<string | null>(initialImageUrl ?? null);
   const [imgLoading, setImgLoading] = useState(!initialImageUrl && !!url);
   const fetchedRef = useRef(false);
@@ -72,7 +88,9 @@ const PostCard: React.FC<{
           : `/api/innercircle/ig-thumbnail?url=${encodeURIComponent(url)}&channel=instagram`;
     fetch(endpoint)
       .then((r) => r.json())
-      .then((d) => { if (d.image_url) setImageUrl(d.image_url); })
+      .then((d) => {
+        if (d.image_url) setImageUrl(d.image_url);
+      })
       .catch(() => {})
       .finally(() => setImgLoading(false));
   }, [url, initialImageUrl, channel]);
@@ -102,7 +120,9 @@ const PostCard: React.FC<{
             className="absolute inset-0 flex items-center justify-center"
             style={{ backgroundColor: isDark ? '#1e293b' : '#f1f5f9' }}
           >
-            {imgLoading && <Loader2 size={12} className="animate-spin" style={{ color: badgeColor }} />}
+            {imgLoading && (
+              <Loader2 size={12} className="animate-spin" style={{ color: badgeColor }} />
+            )}
           </div>
         )}
         <span
@@ -118,7 +138,10 @@ const PostCard: React.FC<{
         <div className="space-y-0.5">
           {metrics.map((m) => (
             <div key={m.label} className="flex justify-between items-center gap-1">
-              <span className="text-[7px] shrink-0" style={{ color: isDark ? '#94a3b8' : '#64748b' }}>
+              <span
+                className="text-[7px] shrink-0"
+                style={{ color: isDark ? '#94a3b8' : '#64748b' }}
+              >
                 {m.label}
               </span>
               <span
@@ -207,14 +230,19 @@ export const CompetitorDetailSlide: React.FC<Props> = ({
   isThumbnail = false,
   currentPage,
   totalPages,
+  savedInsight,
+  onInsightChange,
 }) => {
   const [igPosts, setIgPosts] = useState<IgPost[]>([]);
   const [ttPosts, setTtPosts] = useState<TtPost[]>([]);
   const [twPosts, setTwPosts] = useState<TwPost[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [narrative, setNarrative] = useState('');
-  const [editingNarrative, setEditingNarrative] = useState(false);
+
+  const [insight, setInsight] = useState<string>(() => savedInsight || '');
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
     if (!config.clientName || !competitor || isThumbnail) return;
@@ -234,6 +262,30 @@ export const CompetitorDetailSlide: React.FC<Props> = ({
       .finally(() => setLoading(false));
   }, [config.clientName, config.period, competitor, isThumbnail]);
 
+  const persistInsight = (text: string) => {
+    setInsight(text);
+    onInsightChange?.(text);
+  };
+
+  const handleGenerate = async () => {
+    setIsGenerating(true);
+    try {
+      const prompt = buildCompDetailPrompt(
+        competitor || 'Competitor',
+        config.period,
+        igPosts,
+        ttPosts,
+        twPosts,
+      );
+      const text = await generateGeminiContent(prompt, COMP_DETAIL_ANALYST_SYSTEM_PROMPT);
+      persistInsight(text);
+    } catch {
+      persistInsight('Failed to generate insight.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const contentMode = config.coverDesign?.contentMode || 'light';
   const theme = generateLayoutTheme(
     config.coverDesign?.colors,
@@ -248,6 +300,17 @@ export const CompetitorDetailSlide: React.FC<Props> = ({
   const IG_COLOR = '#E1306C';
   const TT_COLOR = '#EE1D52';
   const TW_COLOR = '#1DA1F2';
+
+  const renderBold = (text: string) =>
+    text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
+      part.startsWith('**') ? (
+        <span key={i} className="font-bold" style={{ color: colorPrimary }}>
+          {part.slice(2, -2)}
+        </span>
+      ) : (
+        <span key={i}>{part}</span>
+      ),
+    );
 
   if (isThumbnail) {
     return (
@@ -404,59 +467,156 @@ export const CompetitorDetailSlide: React.FC<Props> = ({
         {/* Right: Narrative panel */}
         <div
           className="w-60 shrink-0 flex flex-col rounded-xl border overflow-hidden"
-          style={{ backgroundColor: cardBg, borderColor: theme.border }}
+          style={{
+            backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#ffffff',
+            borderColor: theme.border,
+            boxShadow: theme.cardShadow,
+          }}
         >
+          {/* Panel header */}
           <div
-            className="px-2 py-1.5 flex items-center justify-between shrink-0 border-b"
-            style={{
-              borderColor: theme.border,
-              backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#f8fafc',
-            }}
+            className="flex items-center justify-between px-3 py-2 border-b shrink-0"
+            style={{ borderColor: theme.border }}
           >
-            <span
-              className="text-[7px] font-bold uppercase tracking-wider"
-              style={{ color: mutedColor }}
-            >
-              Narrative
-            </span>
-            <button
-              onClick={() => setEditingNarrative(!editingNarrative)}
-              className="text-[7px] font-medium px-1.5 py-0.5 rounded"
-              style={{
-                color: editingNarrative ? '#6b7280' : colorPrimary,
-                backgroundColor: editingNarrative ? '#f3f4f6' : `${colorPrimary}15`,
-              }}
-            >
-              {editingNarrative ? 'Done' : 'Edit'}
-            </button>
+            <div className="flex items-center gap-1.5">
+              <Sparkles size={11} style={{ color: colorPrimary }} />
+              <span
+                className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-white' : 'text-slate-700'}`}
+              >
+                Analysis
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              {insight && !isEditing && (
+                <button
+                  onClick={() => {
+                    setEditValue(insight);
+                    setIsEditing(true);
+                  }}
+                  className={`text-[9px] font-medium px-2 py-0.5 rounded-full border transition-all ${isDark ? 'text-slate-400 border-white/10 hover:bg-white/10' : 'text-slate-500 border-slate-200 hover:bg-slate-50'}`}
+                >
+                  Edit
+                </button>
+              )}
+              {!isEditing && (
+                <button
+                  onClick={handleGenerate}
+                  disabled={isGenerating}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium border transition-all disabled:opacity-50 ${isDark ? 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10' : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100'}`}
+                >
+                  {isGenerating ? (
+                    <Loader2 size={9} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={9} />
+                  )}
+                  <span>AI</span>
+                </button>
+              )}
+            </div>
           </div>
-          {editingNarrative ? (
-            <textarea
-              autoFocus
-              className="flex-1 bg-transparent resize-none outline-none p-2 text-[9px] leading-relaxed"
-              style={{ color: isDark ? '#d1d5db' : '#374151' }}
-              value={narrative}
-              placeholder={`${competitor || 'Competitor'} — Write analysis here…`}
-              onChange={(e) => setNarrative(e.target.value)}
-              onBlur={() => setEditingNarrative(false)}
-            />
-          ) : (
-            <p
-              className="flex-1 p-2 text-[9px] leading-relaxed cursor-text overflow-auto"
-              style={{
-                color: narrative
-                  ? isDark
-                    ? '#d1d5db'
-                    : '#475569'
-                  : isDark
-                    ? '#4b5563'
-                    : '#94a3b8',
-              }}
-              onClick={() => setEditingNarrative(true)}
-            >
-              {narrative || `Click to add analysis for ${competitor || 'this competitor'}…`}
-            </p>
-          )}
+
+          {/* Panel body */}
+          <div className="flex-1 overflow-auto p-2 min-h-0">
+            {isGenerating ? (
+              <div className="flex flex-col items-center justify-center h-full gap-2 opacity-70">
+                <Sparkles size={16} className="text-indigo-500 animate-spin" />
+                <span className="text-[9px] text-indigo-500 font-medium animate-pulse">
+                  Analyzing…
+                </span>
+              </div>
+            ) : isEditing ? (
+              <div className="h-full flex flex-col gap-2">
+                <textarea
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  maxLength={800}
+                  autoFocus
+                  className={`flex-1 text-[10px] leading-relaxed p-2 rounded border focus:outline-none resize-none w-full ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                  placeholder="Type your analysis here…"
+                />
+                <div className="flex justify-end gap-2 shrink-0">
+                  <button
+                    onClick={() => setIsEditing(false)}
+                    className={`text-[9px] px-2 py-1 rounded border ${isDark ? 'border-white/20 text-slate-400' : 'border-slate-200 text-slate-500'}`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      persistInsight(editValue);
+                      setIsEditing(false);
+                    }}
+                    className="text-[9px] px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            ) : insight ? (
+              <div
+                data-ic-insight
+                className="flex flex-col gap-1.5 cursor-pointer"
+                onClick={() => {
+                  setEditValue(insight);
+                  setIsEditing(true);
+                }}
+              >
+                {(() => {
+                  const parsed = parseCompDetailInsight(insight);
+                  const bodyColor = isDark ? '#cbd5e1' : '#475569';
+                  const labelColor = isDark ? '#e2e8f0' : '#374151';
+                  return (
+                    <>
+                      {parsed.analysis && (
+                        <div
+                          className="text-[10px] leading-relaxed font-medium"
+                          style={{ color: bodyColor }}
+                        >
+                          {renderBold(parsed.analysis)}
+                        </div>
+                      )}
+                      {parsed.recommendations.map((rec) => (
+                        <div
+                          key={rec.type}
+                          className="text-[9px] leading-snug"
+                          style={{ color: bodyColor }}
+                        >
+                          <span className="font-bold" style={{ color: labelColor }}>
+                            • {rec.type}:{' '}
+                          </span>
+                          {renderBold(rec.text)}
+                        </div>
+                      ))}
+                    </>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div
+                className="flex flex-col items-center justify-center h-full gap-2 cursor-pointer group"
+                onClick={() => {
+                  setEditValue('');
+                  setIsEditing(true);
+                }}
+              >
+                <div
+                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-all group-hover:scale-105 ${isDark ? 'bg-white/10' : 'bg-indigo-50'}`}
+                >
+                  <Sparkles size={14} style={{ color: colorPrimary }} />
+                </div>
+                <div className="text-center">
+                  <p
+                    className={`text-[9px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
+                  >
+                    Click AI to generate
+                  </p>
+                  <p className={`text-[8px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    or click to write manually
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -470,7 +630,7 @@ export const CompetitorDetailSlide: React.FC<Props> = ({
       {/* Hidden export data — read by exportHelpers.ts */}
       <div
         style={{ display: 'none' }}
-        data-comp-detail={JSON.stringify({ competitor, igPosts, ttPosts, twPosts, narrative })}
+        data-comp-detail={JSON.stringify({ competitor, igPosts, ttPosts, twPosts, insight })}
       />
 
       <SlideFooter
@@ -480,6 +640,7 @@ export const CompetitorDetailSlide: React.FC<Props> = ({
         totalPages={totalPages ?? 1}
         logo={config.coverDesign?.logoData}
         brandColor={config.coverDesign?.colors?.primary}
+        preparedBy={config.preparedBy}
       />
     </div>
   );

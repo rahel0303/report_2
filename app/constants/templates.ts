@@ -48,11 +48,16 @@ const MONTHS = [
 export const getPeriodOptions = (type: 'Monthly' | 'Quarterly'): string[] => {
   const now = new Date();
   if (type === 'Monthly') {
-    // Tampilkan 3 bulan terakhir (tidak termasuk bulan ini)
-    return [1, 2, 3].reverse().map((i) => {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
-    });
+    // Semua bulan dari Januari 2025 hingga bulan lalu (tidak termasuk bulan ini)
+    const options: string[] = [];
+    const start = new Date(2025, 0, 1); // January 2025
+    const end = new Date(now.getFullYear(), now.getMonth() - 1, 1); // last month
+    const cur = new Date(end);
+    while (cur >= start) {
+      options.push(`${MONTHS[cur.getMonth()]} ${cur.getFullYear()}`);
+      cur.setMonth(cur.getMonth() - 1);
+    }
+    return options;
   }
   const year = now.getFullYear();
   const prevYear = year - 1;

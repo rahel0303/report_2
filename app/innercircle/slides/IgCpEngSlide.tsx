@@ -72,8 +72,6 @@ function monthLabel(mmYyyy: string) {
 }
 
 function fmtNum(v: number): string {
-  if (Math.abs(v) >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M';
-  if (Math.abs(v) >= 1_000) return (v / 1_000).toFixed(1) + 'K';
   return v.toLocaleString('id-ID', { maximumFractionDigits: 0 });
 }
 
@@ -557,6 +555,7 @@ export const IgCpEngSlide: React.FC<Props> = ({
           totalPages={totalPages ?? 1}
           logo={config.coverDesign?.logoData}
           brandColor={config.coverDesign?.colors?.primary}
+          preparedBy={config.preparedBy}
         />
       </div>
     </div>

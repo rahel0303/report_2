@@ -47,8 +47,6 @@ function fmtN(v: number | null | undefined): string {
   if (v === null || v === undefined) return '-';
   const n = Number(v);
   if (isNaN(n)) return '-';
-  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (Math.abs(n) >= 1_000) return (n / 1_000).toFixed(1) + 'K';
   return n.toLocaleString();
 }
 
@@ -430,6 +428,7 @@ export const IgTaggedPostSlide: React.FC<Props> = ({
           totalPages={totalPages ?? 1}
           logo={config.coverDesign?.logoData}
           brandColor={config.coverDesign?.colors?.primary}
+          preparedBy={config.preparedBy}
         />
       </div>
     </div>

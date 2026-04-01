@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Swal from 'sweetalert2';
+import { AppSidebar } from '@/app/components/ui/AppSidebar';
 import {
   Building2,
   Users,
@@ -524,6 +525,7 @@ export default function AdminPage() {
 
   return (
     <div className="flex h-screen bg-gray-50 font-sans">
+      <AppSidebar mode="overlay" />
       {/* ── Sidebar ── */}
       <aside className="flex w-60 flex-col bg-white border-r border-gray-100 shadow-sm">
         <div className="px-6 py-5 border-b border-gray-100">

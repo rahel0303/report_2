@@ -181,6 +181,8 @@ export const renderSlide = (
           isThumbnail={mode === 'thumbnail'}
           currentPage={currentPage}
           totalPages={totalPages}
+          savedInsight={slide.content?.insight}
+          onInsightChange={(val) => onUpdate?.('insight', val)}
           key={`ic-all-overview-${config.clientName}-${config.period}`}
         />
       );
@@ -252,6 +254,8 @@ export const renderSlide = (
           isThumbnail={mode === 'thumbnail'}
           currentPage={currentPage}
           totalPages={totalPages}
+          savedInsight={slide.content?.insight}
+          onInsightChange={(val) => onUpdate?.('insight', val)}
           key={`ic-ig-best-least-${config.clientName}-${config.period}`}
         />
       );
@@ -264,6 +268,8 @@ export const renderSlide = (
           currentPage={currentPage}
           totalPages={totalPages}
           pillarOffset={slide.content?.pillarOffset ?? 0}
+          savedInsights={slide.content?.pillarInsights}
+          onInsightsChange={(val) => onUpdate?.('pillarInsights', val)}
           onUpdate={onUpdate}
           key={`ic-ig-content-pillar-${config.clientName}-${config.period}-${slide.content?.pillarOffset ?? 0}`}
         />
@@ -301,6 +307,8 @@ export const renderSlide = (
           isThumbnail={mode === 'thumbnail'}
           currentPage={currentPage}
           totalPages={totalPages}
+          savedInsight={slide.content?.insight}
+          onInsightChange={(val) => onUpdate?.('insight', val)}
           key={`ic-tt-organic-best-least-${config.clientName}-${config.period}`}
         />
       );
@@ -313,6 +321,8 @@ export const renderSlide = (
           isThumbnail={mode === 'thumbnail'}
           currentPage={currentPage}
           totalPages={totalPages}
+          savedInsight={slide.content?.insight}
+          onInsightChange={(val) => onUpdate?.('insight', val)}
           key={`ic-tt-paid-best-least-${config.clientName}-${config.period}`}
         />
       );
@@ -324,6 +334,8 @@ export const renderSlide = (
           isThumbnail={mode === 'thumbnail'}
           currentPage={currentPage}
           totalPages={totalPages}
+          savedInsights={slide.content?.pillarInsights}
+          onInsightsChange={(val) => onUpdate?.('pillarInsights', val)}
           key={`ic-tt-content-pillar-${config.clientName}-${config.period}`}
         />
       );
@@ -396,6 +408,8 @@ export const renderSlide = (
           isThumbnail={mode === 'thumbnail'}
           currentPage={currentPage}
           totalPages={totalPages}
+          savedInsight={slide.content?.insight}
+          onInsightChange={(val) => onUpdate?.('insight', val)}
           key={`ic-tw-best-least-${config.clientName}-${config.period}`}
         />
       );
@@ -407,6 +421,8 @@ export const renderSlide = (
           isThumbnail={mode === 'thumbnail'}
           currentPage={currentPage}
           totalPages={totalPages}
+          savedInsight={slide.content?.insight}
+          onInsightChange={(val) => onUpdate?.('insight', val)}
           key={`ic-tw-content-${config.clientName}-${config.period}`}
         />
       );
@@ -431,6 +447,8 @@ export const renderSlide = (
           isThumbnail={mode === 'thumbnail'}
           currentPage={currentPage}
           totalPages={totalPages}
+          savedInsight={slide.content?.insight}
+          onInsightChange={(val) => onUpdate?.('insight', val)}
           key={`ic-comp-overview-${config.clientName}-${config.period}`}
         />
       );
@@ -443,7 +461,8 @@ export const renderSlide = (
           isThumbnail={mode === 'thumbnail'}
           currentPage={currentPage}
           totalPages={totalPages}
-          onUpdate={onUpdate}
+          savedInsight={slide.content?.insight}
+          onInsightChange={(val) => onUpdate?.('insight', val)}
           key={`ic-comp-detail-${slide.id}-${config.clientName}-${config.period}`}
         />
       );
@@ -456,6 +475,8 @@ export const renderSlide = (
           isThumbnail={mode === 'thumbnail'}
           currentPage={currentPage}
           totalPages={totalPages}
+          savedInsight={slide.content?.insight}
+          onInsightChange={(val) => onUpdate?.('insight', val)}
           key={`ic-comp-ig-focus-${slide.id}-${config.clientName}-${config.period}`}
         />
       );

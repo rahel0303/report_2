@@ -6,6 +6,14 @@ import { hexLuminance } from '@/app/utils/colorExtractor';
 export type SlideData = Slide;
 export type { ReportConfig };
 
+// Autometric branding logo data (pre-loaded before export)
+let _autometricIconData: string | null = null;
+let _autometricLongData: string | null = null;
+export function setAutometricLogoData(icon: string | null, long: string | null) {
+  _autometricIconData = icon;
+  _autometricLongData = long;
+}
+
 // Helper to convert hex to RGB without #
 const cleanColor = (hex: string) => hex.replace('#', '');
 
@@ -356,46 +364,84 @@ function parseInsightRichText(
   tv: SlideThemeVars,
   fontSize: number,
   fontFace: string,
+  recFontSize?: number, // smaller font for SCALE/REFINE/EXPLORE/STOP bullet lines
 ): PptxGenJS.TextProps[] {
   const bodyColor = tv.isDark ? 'CBD5E1' : '475569';
+  const recLabelRe = /^(SCALE|REFINE|EXPLORE|STOP):/i;
   const lines = text.split('\n').filter((l) => l.trim() !== '');
   const runs: PptxGenJS.TextProps[] = [];
 
   lines.forEach((line, lineIdx) => {
-    const isBullet = /^[-•]\s/.test(line.trim());
-    const content = isBullet ? line.trim().replace(/^[-•]\s*/, '') : line;
-    const segments = content.split(/(\*\*.*?\*\*)/g);
+    const trimmed = line.trim();
+    const hasBulletPrefix = /^[-•]\s/.test(trimmed);
+    // Strip bullet prefix if present, then check for rec label
+    const withoutBullet = hasBulletPrefix ? trimmed.replace(/^[-•]\s*/, '') : trimmed;
+    // Detect SCALE:/REFINE:/EXPLORE:/STOP: with OR without bullet prefix
+    const recMatch = withoutBullet.match(/^(SCALE|REFINE|EXPLORE|STOP):\s*/i);
+    const isRecLine = !!recMatch;
+    const lineFs = isRecLine && recFontSize ? recFontSize : fontSize;
     const isLastLine = lineIdx === lines.length - 1;
 
-    // Prepend bullet character as a plain text run (most reliable across PPT renderers)
-    if (isBullet) {
+    // Always prepend "- " for rec lines (regardless of original format)
+    if (isRecLine) {
       runs.push({
-        text: '• ',
-        options: { fontSize, fontFace, color: tv.primaryColor, bold: false },
+        text: '- ',
+        options: { fontSize: lineFs, fontFace, color: bodyColor, bold: false },
+      });
+      // Bold label e.g. "SCALE:"
+      const label = recMatch![0].trimEnd(); // "SCALE:"
+      const rest = withoutBullet.slice(recMatch![0].length);
+      const restSegments = rest.split(/(\*\*.*?\*\*)/g);
+
+      runs.push({
+        text: label + ' ',
+        options: { fontSize: lineFs, fontFace, color: bodyColor, bold: true },
+      });
+
+      restSegments.forEach((seg, segIdx) => {
+        const isBoldSeg = seg.startsWith('**') && seg.endsWith('**');
+        const segText = isBoldSeg ? seg.slice(2, -2) : seg;
+        const isLastSeg = segIdx === restSegments.length - 1;
+        const runOpts: PptxGenJS.TextPropsOptions = {
+          fontSize: lineFs,
+          fontFace,
+          color: isBoldSeg ? tv.primaryColor : bodyColor,
+          bold: isBoldSeg,
+        };
+        if (isLastSeg && !isLastLine) runOpts.breakLine = true;
+        if (segText) runs.push({ text: segText, options: runOpts });
+      });
+    } else {
+      // Normal prose or non-rec bullet
+      if (hasBulletPrefix) {
+        runs.push({
+          text: '• ',
+          options: { fontSize: lineFs, fontFace, color: tv.primaryColor, bold: false },
+        });
+      }
+      const segments = withoutBullet.split(/(\*\*.*?\*\*)/g);
+      segments.forEach((seg, segIdx) => {
+        const isBoldSeg = seg.startsWith('**') && seg.endsWith('**');
+        const segText = isBoldSeg ? seg.slice(2, -2) : seg;
+        const isLastSeg = segIdx === segments.length - 1;
+        const runOpts: PptxGenJS.TextPropsOptions = {
+          fontSize: lineFs,
+          fontFace,
+          color: isBoldSeg ? tv.primaryColor : bodyColor,
+          bold: isBoldSeg,
+        };
+        if (isLastSeg && !isLastLine) runOpts.breakLine = true;
+        if (segText) runs.push({ text: segText, options: runOpts });
       });
     }
-
-    segments.forEach((seg, segIdx) => {
-      const isBoldSeg = seg.startsWith('**') && seg.endsWith('**');
-      const segText = isBoldSeg ? seg.slice(2, -2) : seg;
-      const isLastSeg = segIdx === segments.length - 1;
-
-      const runOpts: PptxGenJS.TextPropsOptions = {
-        fontSize,
-        fontFace,
-        color: isBoldSeg ? tv.primaryColor : bodyColor,
-        bold: isBoldSeg,
-      };
-
-      if (isLastSeg && !isLastLine) {
-        runOpts.breakLine = true;
-      }
-
-      runs.push({ text: segText, options: runOpts });
-    });
   });
 
   return runs;
+}
+
+/** Strip **bold** markers from text — fallback for when rich text is not used */
+function stripBoldMarkers(text: string): string {
+  return text.replace(/\*\*/g, '');
 }
 
 function drawSlideInsight(
@@ -410,6 +456,7 @@ function drawSlideInsight(
     label: string;
     text: string;
     fontSize?: number;
+    recFontSize?: number;
   },
 ) {
   // Card background
@@ -466,9 +513,11 @@ function drawSlideInsight(
   // Content text
   if (opts.text) {
     const fs = opts.fontSize ?? 9;
-    const hasFormatting = /\*\*|(?:^|\n)[-•]\s/.test(opts.text);
+    const hasFormatting = /\*\*|(?:^|\n)[-•]\s|(?:^|\n)(?:SCALE|REFINE|EXPLORE|STOP):/im.test(
+      opts.text,
+    );
     const textPayload = hasFormatting
-      ? parseInsightRichText(opts.text, tv, fs, tv.font)
+      ? parseInsightRichText(opts.text, tv, fs, tv.font, opts.recFontSize)
       : opts.text;
     slide.addText(textPayload as any, {
       x: opts.x + 0.15,
@@ -2655,18 +2704,32 @@ function drawNativeFooter(
     valign: 'middle',
   });
 
-  // Powered by Sekata
-  slide.addText('Powered by Sekata', {
-    x: 3.5,
-    y: footerY + 0.04,
-    w: 3,
-    h: 0.38,
-    fontSize: 7,
-    color: '9CA3AF',
-    fontFace: font,
-    align: 'center',
-    valign: 'middle',
-  });
+  // Prepared by — center of footer
+  if (config.preparedBy) {
+    slide.addText('Prepared by', {
+      x: 3.5,
+      y: footerY + 0.04,
+      w: 3,
+      h: 0.18,
+      fontSize: 6,
+      color: '9CA3AF',
+      fontFace: font,
+      align: 'center',
+      valign: 'middle',
+    });
+    slide.addText(config.preparedBy, {
+      x: 3.5,
+      y: footerY + 0.22,
+      w: 3,
+      h: 0.18,
+      fontSize: 7,
+      bold: true,
+      color: '374151',
+      fontFace: font,
+      align: 'center',
+      valign: 'middle',
+    });
+  }
 
   // Page number
   slide.addText(`${currentPage} / ${totalPages}`, {
@@ -4379,7 +4442,7 @@ export function createIcAllOverviewNative(
   const tblX = 0.3;
   const tblY = 0.97;
   const tblW = 9.4;
-  const tblH = 2.35;
+  const tblH = 1.85;
 
   slide.addShape(pptx.ShapeType.roundRect, {
     x: tblX,
@@ -4478,7 +4541,7 @@ export function createIcAllOverviewNative(
   }
 
   // ── Analysis / Insight card ──────────────────────────────────────────────
-  const insY = tblY + tblH + 0.12;
+  const insY = tblY + tblH + 0.1;
   const insH = 5.1 - insY - 0.05;
   drawSlideInsight(slide, pptx, tv, {
     x: tblX,
@@ -4487,6 +4550,8 @@ export function createIcAllOverviewNative(
     h: insH,
     label: 'Analysis',
     text: data.insightText,
+    fontSize: 7,
+    recFontSize: 7,
   });
 
   drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
@@ -4898,13 +4963,13 @@ export function createIcIgGrowthNative(
 
   const { font, isDark, textColor, mutedColor, cardBg, borderColor, primaryColor } = tv;
 
-  // ── Top row: Chart left (63%) + Analysis right (37%) ─────────────────────
+  // ── Top row: Chart left (55%) + Analysis right (45%) ─────────────────────
   const rowX = 0.3;
   const rowY = 0.97;
   const rowW = 9.4;
   const rowH = 2.5;
   const gap = 0.12;
-  const chartW = Math.round(rowW * 0.63 * 100) / 100;
+  const chartW = Math.round(rowW * 0.55 * 100) / 100;
   const analysisX = rowX + chartW + gap;
   const analysisW = rowW - chartW - gap;
 
@@ -5019,6 +5084,7 @@ export function createIcIgGrowthNative(
     label: 'Analysis',
     text: data.insightText,
     fontSize: 7,
+    recFontSize: 7,
   });
 
   // ── Full-width Table ──────────────────────────────────────────────────────
@@ -5187,8 +5253,6 @@ function fmtNative(v: number | null | undefined): string {
   if (v === null || v === undefined) return '-';
   const n = Number(v);
   if (isNaN(n)) return '-';
-  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (Math.abs(n) >= 1_000) return (n / 1_000).toFixed(1) + 'K';
   return n.toLocaleString();
 }
 
@@ -5420,8 +5484,8 @@ export function createIcIgBestLeastNative(
       y: analysisY,
       w: colW,
       h: analysisH,
-      fill: { color: color, transparency: 96 },
-      line: { color: color, width: 0.75, transparency: 70 },
+      fill: { color: cardBg },
+      line: { color: borderColor, width: 0.5 },
       rectRadius: 0.06,
     });
     // Title bar
@@ -5430,7 +5494,7 @@ export function createIcIgBestLeastNative(
       y: analysisY,
       w: colW,
       h: 0.22,
-      fill: { color: color, transparency: 85 },
+      fill: { color: primaryColor, transparency: 88 },
       line: { type: 'none' },
     });
     slide.addText(`INSIGHTS \u2014 ${label.toUpperCase()}`, {
@@ -5440,22 +5504,28 @@ export function createIcIgBestLeastNative(
       h: 0.22,
       fontSize: 6,
       bold: true,
-      color: color,
+      color: primaryColor,
       fontFace: font,
       valign: 'middle',
     });
     // Analysis body text
-    slide.addText(analysis || 'No analysis provided.', {
-      x: cx + 0.1,
-      y: analysisY + 0.24,
-      w: colW - 0.2,
-      h: analysisH - 0.3,
-      fontSize: 7,
-      color: isDark ? 'CBD5E1' : '475569',
-      fontFace: font,
-      valign: 'top',
-      wrap: true,
-    });
+    const analysisText = analysis || '';
+    if (analysisText) {
+      const richRuns = parseInsightRichText(analysisText, tv, 6.5, font, 6.5);
+      slide.addText(richRuns, {
+        x: cx + 0.1,
+        y: analysisY + 0.24,
+        w: colW - 0.2,
+        h: analysisH - 0.3,
+        fontSize: 6.5,
+        color: isDark ? 'CBD5E1' : '475569',
+        align: 'left',
+        valign: 'top',
+        fontFace: font,
+        lineSpacingMultiple: 1.3,
+        wrap: true,
+      });
+    }
   });
 
   drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
@@ -5523,9 +5593,9 @@ export function createIcIgContentPillarNative(
       : bodyH;
 
   const sidebarW = 0.22;
-  const insightW = 1.8;
+  const insightW = 2.4;
   const secGap = 0.06;
-  const lowHighW = (contentW - sidebarW - insightW - 3 * secGap) / 2; // ~3.6
+  const lowHighW = (contentW - sidebarW - insightW - 3 * secGap) / 2; // ~3.3
 
   const sidebarX = contentX;
   const lowX = sidebarX + sidebarW + secGap;
@@ -5769,17 +5839,23 @@ export function createIcIgContentPillarNative(
       valign: 'middle',
     });
     // Body text
-    slide.addText(pData.insight || 'No analysis provided.', {
-      x: insightX + 0.08,
-      y: py + 0.24,
-      w: insightW - 0.16,
-      h: pillarH - 0.3,
-      fontSize: 6.5,
-      color: isDark ? 'CBD5E1' : '475569',
-      fontFace: font,
-      valign: 'top',
-      wrap: true,
-    });
+    const pillarInsightText = pData.insight || '';
+    if (pillarInsightText) {
+      const pillarRichRuns = parseInsightRichText(pillarInsightText, tv, 6, font, 6);
+      slide.addText(pillarRichRuns, {
+        x: insightX + 0.08,
+        y: py + 0.24,
+        w: insightW - 0.16,
+        h: pillarH - 0.3,
+        fontSize: 6,
+        color: isDark ? 'CBD5E1' : '475569',
+        align: 'left',
+        valign: 'top',
+        fontFace: font,
+        lineSpacingMultiple: 1.3,
+        wrap: true,
+      });
+    }
   });
 
   drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
@@ -6304,7 +6380,7 @@ export function createIcTtGrowthNative(
   const bodyH = footerY - bodyY; // 4.18"
 
   const gap = 0.12;
-  const insightW = contentW * 0.28;
+  const insightW = contentW * 0.34;
   const chartW = contentW - insightW - gap;
   const insightX = contentX + chartW + gap;
 
@@ -6466,6 +6542,8 @@ export function createIcTtGrowthNative(
     h: chartsH,
     label: 'Analysis',
     text: data.insight || '',
+    fontSize: 6.3,
+    recFontSize: 6.3,
   });
 
   // ── Overview table — styled like IG Growth ─────────────────────────────────
@@ -6799,40 +6877,40 @@ export function createIcTtBestLeastNative(
     align: 'left',
     valign: 'middle',
   });
-  const insightText = data.insight
-    ? data.insight
-        .split('\n')
-        .filter(Boolean)
-        .map((l) =>
-          l
-            .replace(/\*\*(.*?)\*\*/g, '$1')
-            .replace(/^[-•]\s*/, '• ')
-            .trim(),
-        )
-        .join('\n')
-    : 'No insight generated.';
-  slide.addText(insightText, {
-    x: rightX + 0.08,
-    y: bodyY + 0.18,
-    w: rightW - 0.16,
-    h: bodyH - 0.22,
-    fontSize: 6.5,
-    color: data.insight ? textColor : mutedColor,
-    fontFace: font,
-    align: 'left',
-    valign: 'top',
-    italic: !data.insight,
-    paraSpaceAfter: 4,
-    lineSpacingMultiple: 1.2,
-    wrap: true,
-  });
+  if (data.insight) {
+    const richRuns = parseInsightRichText(data.insight, tv, 6.5, font, 6);
+    slide.addText(richRuns as any, {
+      x: rightX + 0.08,
+      y: bodyY + 0.18,
+      w: rightW - 0.16,
+      h: bodyH - 0.22,
+      fontSize: 6.5,
+      color: isDark ? 'CBD5E1' : '475569',
+      fontFace: font,
+      align: 'left',
+      valign: 'top',
+      lineSpacingMultiple: 1.3,
+      wrap: true,
+    });
+  } else {
+    slide.addText('No insight generated.', {
+      x: rightX + 0.08,
+      y: bodyY + 0.18,
+      w: rightW - 0.16,
+      h: bodyH - 0.22,
+      fontSize: 6.5,
+      color: mutedColor,
+      fontFace: font,
+      align: 'left',
+      valign: 'top',
+      italic: true,
+      wrap: true,
+    });
+  }
 
   drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// TikTok: Content Pillar (tiktok_page_20)
-// ─────────────────────────────────────────────────────────────────────────────
 export function createIcTtContentPillarNative(
   pptx: PptxGenJS,
   config: ReportConfig,
@@ -7079,43 +7157,46 @@ export function createIcTtContentPillarNative(
       align: 'left',
       valign: 'middle',
     });
-    const iText = pData.insight
-      ? pData.insight
-          .split('\n')
-          .filter(Boolean)
-          .map((l) =>
-            l
-              .replace(/\*\*(.*?)\*\*/g, '$1')
-              .replace(/^[-•]\s*/, '• ')
-              .trim(),
-          )
-          .join('\n')
-      : 'No insight generated.';
-    slide.addText(iText, {
-      x: insightX + 0.08,
-      y: py + 0.18,
-      w: insightW - 0.16,
-      h: pillarH - 0.22,
-      fontSize: 6,
-      color: pData.insight ? textColor : mutedColor,
-      fontFace: font,
-      align: 'left',
-      valign: 'top',
-      italic: !pData.insight,
-      paraSpaceAfter: 4,
-      lineSpacingMultiple: 1.2,
-      wrap: true,
-    });
+    if (pData.insight) {
+      const richRuns = parseInsightRichText(pData.insight, tv, 6, font, 5.5);
+      slide.addText(richRuns as any, {
+        x: insightX + 0.08,
+        y: py + 0.18,
+        w: insightW - 0.16,
+        h: pillarH - 0.22,
+        fontSize: 6,
+        color: isDark ? 'CBD5E1' : '475569',
+        fontFace: font,
+        align: 'left',
+        valign: 'top',
+        lineSpacingMultiple: 1.3,
+        wrap: true,
+      });
+    } else {
+      slide.addText('No insight generated.', {
+        x: insightX + 0.08,
+        y: py + 0.18,
+        w: insightW - 0.16,
+        h: pillarH - 0.22,
+        fontSize: 6,
+        color: mutedColor,
+        fontFace: font,
+        align: 'left',
+        valign: 'top',
+        italic: true,
+        wrap: true,
+      });
+    }
   });
 
   drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
 }
 
-// ── ic_ig_cp_eng (Slides 11 & 12) ────────────────────────────────────────────
 interface IcCpPillarRow {
   content_pillar: string;
   value: number;
 }
+
 interface IcCpDeltaRow {
   content_pillar: string;
   inc: number | null;
@@ -7135,30 +7216,6 @@ interface IcIgCpEngExportData {
   totalPages: number;
 }
 
-function fmtPct(v: number | null): string {
-  if (v === null || v === undefined || isNaN(v as number)) return '-';
-  return `${(v as number) >= 0 ? '+' : ''}${(v as number).toFixed(0)}%`;
-}
-
-function buildAlignedRows(
-  curr: IcCpPillarRow[],
-  prev: IcCpPillarRow[],
-): { pillar: string; currVal: number; prevVal: number }[] {
-  const all = Array.from(
-    new Set([
-      ...curr.map((r: IcCpPillarRow) => r.content_pillar),
-      ...prev.map((r: IcCpPillarRow) => r.content_pillar),
-    ]),
-  ).sort();
-  const cm = Object.fromEntries(curr.map((r: IcCpPillarRow) => [r.content_pillar, r.value]));
-  const pm = Object.fromEntries(prev.map((r: IcCpPillarRow) => [r.content_pillar, r.value]));
-  return all.map((p: string) => ({
-    pillar: p,
-    currVal: (cm as any)[p] ?? 0,
-    prevVal: (pm as any)[p] ?? 0,
-  }));
-}
-
 const MONTH_ID_PPTX: Record<string, string> = {
   '01': 'Jan',
   '02': 'Feb',
@@ -7173,15 +7230,38 @@ const MONTH_ID_PPTX: Record<string, string> = {
   '11': 'Nov',
   '12': 'Des',
 };
-function monthLabelPptx(mmYyyy: string) {
-  const [mm, yyyy] = mmYyyy.split('-');
+
+function monthLabelPptx(mmYyyy: string): string {
+  const [mm, yyyy] = (mmYyyy || '').split('-');
+  if (!mm || !yyyy) return mmYyyy || '-';
   return `${MONTH_ID_PPTX[mm] ?? mm} ${yyyy}`;
 }
 
+function buildAlignedRows(curr: IcCpPillarRow[], prev: IcCpPillarRow[]) {
+  const allPillars = Array.from(
+    new Set([
+      ...(curr || []).map((r) => r.content_pillar),
+      ...(prev || []).map((r) => r.content_pillar),
+    ]),
+  ).sort();
+  const currMap = Object.fromEntries(
+    (curr || []).map((r) => [r.content_pillar, Number(r.value) || 0]),
+  );
+  const prevMap = Object.fromEntries(
+    (prev || []).map((r) => [r.content_pillar, Number(r.value) || 0]),
+  );
+  return allPillars.map((pillar) => ({
+    pillar,
+    curr: currMap[pillar] ?? 0,
+    prev: prevMap[pillar] ?? 0,
+  }));
+}
+
 function drawCpBarChart(
+  pptx: PptxGenJS,
   slide: PptxGenJS.Slide,
   tv: SlideThemeVars,
-  rows: { pillar: string; currVal: number; prevVal: number }[],
+  rows: Array<{ pillar: string; curr: number; prev: number }>,
   prevLabel: string,
   currLabel: string,
   title: string,
@@ -7190,141 +7270,79 @@ function drawCpBarChart(
   w: number,
   h: number,
 ) {
-  const { font, isDark, mutedColor, primaryColor, cardBg, borderColor } = tv;
-  const BAR_PREV = '4FC1E9';
+  const { isDark, cardBg, borderColor, mutedColor, font, primaryColor } = tv;
 
-  // Card background
-  slide.addShape('roundRect' as any, {
+  slide.addShape(pptx.ShapeType.roundRect, {
     x,
     y,
     w,
     h,
     fill: { color: cardBg },
-    line: { color: borderColor, width: 0.75 },
-    rectRadius: 0.08,
+    line: { color: borderColor, width: 0.5 },
+    rectRadius: 0.06,
   });
 
-  // Section title
   slide.addText(title, {
-    x: x + 0.1,
+    x: x + 0.08,
     y: y + 0.04,
-    w: w - 0.2,
-    h: 0.17,
-    fontSize: 7,
+    w: w - 0.16,
+    h: 0.16,
+    fontSize: 6.5,
     bold: true,
-    color: isDark ? 'E2E8F0' : '475569',
+    color: primaryColor,
     fontFace: font,
     align: 'left',
     valign: 'middle',
   });
 
-  if (rows.length === 0) {
+  const labels = rows.map((r) => r.pillar);
+  const prevValues = rows.map((r) => r.prev);
+  const currValues = rows.map((r) => r.curr);
+
+  if (labels.length > 0) {
+    slide.addChart(
+      pptx.ChartType.bar,
+      [
+        { name: prevLabel, labels, values: prevValues },
+        { name: currLabel, labels, values: currValues },
+      ],
+      {
+        x: x + 0.06,
+        y: y + 0.22,
+        w: w - 0.12,
+        h: h - 0.28,
+        showLegend: true,
+        legendPos: 't',
+        legendFontSize: 6,
+        legendColor: mutedColor,
+        catAxisLabelFontSize: 6,
+        valAxisLabelFontSize: 6,
+        catAxisLabelColor: mutedColor,
+        valAxisLabelColor: mutedColor,
+        valGridLine: { color: isDark ? '334155' : 'E2E8F0' },
+        catGridLine: { style: 'none' },
+        barGrouping: 'clustered',
+        barDir: 'bar',
+        chartColors: [isDark ? '64748B' : '94A3B8', primaryColor],
+      } as Record<string, unknown>,
+    );
+  } else {
     slide.addText('No data', {
-      x,
-      y: y + h / 2,
-      w,
-      h: 0.2,
-      fontSize: 8,
+      x: x + 0.08,
+      y: y + 0.22,
+      w: w - 0.16,
+      h: h - 0.28,
+      fontSize: 7,
       color: mutedColor,
       fontFace: font,
       align: 'center',
+      valign: 'middle',
     });
-    return;
   }
-
-  const labels = rows.map((r: any) =>
-    r.pillar.length > 14 ? r.pillar.substring(0, 13) + '...' : r.pillar,
-  );
-  // Replace 0 or near-zero (<1) with null → no bar rendered, no data label rendered
-  const prevVals = rows.map((r: any) => (!r.prevVal || r.prevVal < 1 ? null : r.prevVal)) as any[];
-  const currVals = rows.map((r: any) => (!r.currVal || r.currVal < 1 ? null : r.currVal)) as any[];
-
-  // Layout: two charts side by side, matching preview layout
-  const pad = 0.06;
-  const gap = 0.06;
-  const titleH = 0.22;
-  const lblH = 0.14;
-  const chartY = y + titleH + lblH;
-  const chartH = h - titleH - lblH - 0.05;
-  const cW = (w - pad * 2 - gap) / 2;
-  const cx1 = x + pad;
-  const cx2 = cx1 + cW + gap;
-
-  // Month labels
-  slide.addText(prevLabel, {
-    x: cx1,
-    y: y + titleH,
-    w: cW,
-    h: lblH,
-    fontSize: 5.5,
-    color: mutedColor,
-    fontFace: font,
-    align: 'center',
-  });
-  slide.addText(currLabel, {
-    x: cx2,
-    y: y + titleH,
-    w: cW,
-    h: lblH,
-    fontSize: 5.5,
-    bold: true,
-    color: primaryColor,
-    fontFace: font,
-    align: 'center',
-  });
-
-  // Centre divider
-  slide.addShape('line' as any, {
-    x: cx2 - gap / 2,
-    y: y + titleH,
-    w: 0,
-    h: h - titleH - 0.04,
-    line: { color: borderColor, width: 0.5 },
-  });
-
-  const sharedOpts = {
-    barDir: 'bar',
-    barGrouping: 'clustered',
-    barGapWidthPct: 20,
-    showLegend: false,
-    showValue: true,
-    dataLabelFontSize: 6.5,
-    dataLabelColor: isDark ? 'FFFFFF' : '374151',
-    dataLabelFormatCode: '#,##0.##;-#,##0.##;""',
-    catAxisLabelFontSize: 5.5,
-    catAxisLabelColor: mutedColor,
-    valAxisLabelFontSize: 5.5,
-    valAxisLabelColor: mutedColor,
-    valLabelFormatCode: '#,##0;-#,##0;""',
-    valAxisLineShow: false,
-    catAxisLineShow: false,
-    valGridLine: { style: 'none' as const },
-    catGridLine: { style: 'none' as const },
-    showTitle: false,
-  } as any;
-
-  // Left chart — previous month (blue)
-  slide.addChart('bar' as any, [{ name: prevLabel, labels, values: prevVals }], {
-    x: cx1,
-    y: chartY,
-    w: cW,
-    h: chartH,
-    chartColors: [BAR_PREV],
-    ...sharedOpts,
-  } as any);
-
-  // Right chart — current month (primary color)
-  slide.addChart('bar' as any, [{ name: currLabel, labels, values: currVals }], {
-    x: cx2,
-    y: chartY,
-    w: cW,
-    h: chartH,
-    chartColors: [primaryColor],
-    ...sharedOpts,
-  } as any);
 }
 
 function drawDeltaPanel(
+  pptx: PptxGenJS,
   slide: PptxGenJS.Slide,
   tv: SlideThemeVars,
   title: string,
@@ -7335,23 +7353,23 @@ function drawDeltaPanel(
   w: number,
   h: number,
 ) {
-  const { font, isDark, cardBg, borderColor, primaryColor, mutedColor } = tv;
+  const { cardBg, borderColor, mutedColor, font, isDark, textColor, primaryColor } = tv;
 
-  slide.addShape('roundRect' as any, {
+  slide.addShape(pptx.ShapeType.roundRect, {
     x,
     y,
     w,
     h,
     fill: { color: cardBg },
-    line: { color: borderColor, width: 0.75 },
-    rectRadius: 0.08,
+    line: { color: borderColor, width: 0.5 },
+    rectRadius: 0.06,
   });
 
   slide.addText(title, {
-    x: x + 0.1,
-    y: y + 0.06,
-    w: w - 0.2,
-    h: 0.18,
+    x: x + 0.08,
+    y: y + 0.05,
+    w: w - 0.16,
+    h: 0.15,
     fontSize: 6.5,
     bold: true,
     color: primaryColor,
@@ -7360,42 +7378,47 @@ function drawDeltaPanel(
     valign: 'middle',
   });
 
-  const deltaMap = Object.fromEntries(deltas.map((d: IcCpDeltaRow) => [d.content_pillar, d.inc]));
-  const rowH = Math.min(0.22, (h - 0.28) / Math.max(pillars.length, 1));
-  let ry = y + 0.28;
+  const deltaMap = Object.fromEntries((deltas || []).map((d) => [d.content_pillar, d.inc]));
+  const rowPillars = (pillars || []).slice(0, 9);
+  const rowH = rowPillars.length > 0 ? Math.min(0.2, (h - 0.28) / rowPillars.length) : 0.18;
+  let cy = y + 0.22;
 
-  pillars.forEach((p: string) => {
-    const inc = (deltaMap as any)[p] ?? null;
-    const label = fmtPct(inc);
-    const color = inc === null ? mutedColor : inc >= 0 ? '16A34A' : 'DC2626';
+  rowPillars.forEach((pillar) => {
+    const inc = deltaMap[pillar] ?? null;
+    const label =
+      inc === null || Number.isNaN(inc) ? '-' : `${inc >= 0 ? '+' : ''}${inc.toFixed(0)}%`;
+    const color = inc === null || Number.isNaN(inc) ? mutedColor : inc >= 0 ? '16A34A' : 'DC2626';
 
-    slide.addText(p.length > 12 ? p.substring(0, 11) + '...' : p, {
+    slide.addText(pillar, {
       x: x + 0.08,
-      y: ry,
-      w: w * 0.6,
+      y: cy,
+      w: w - 0.78,
       h: rowH,
-      fontSize: 5.5,
+      fontSize: 6,
       color: isDark ? '94A3B8' : '64748B',
       fontFace: font,
       align: 'left',
       valign: 'middle',
     });
+
     slide.addText(label, {
-      x: x + w * 0.58,
-      y: ry,
-      w: w * 0.38,
+      x: x + w - 0.68,
+      y: cy,
+      w: 0.6,
       h: rowH,
       fontSize: 6,
       bold: true,
-      color,
+      color: inc === null ? textColor : color,
       fontFace: font,
       align: 'right',
       valign: 'middle',
     });
-    ry += rowH;
+
+    cy += rowH;
   });
 }
 
+// ── ic_ig_cp_eng (Slides 11 & 12) ───────────────────────────────────────────────────────────────────────────────
 export function createIcIgCpEngNative(
   pptx: PptxGenJS,
   config: ReportConfig,
@@ -7433,6 +7456,7 @@ export function createIcIgCpEngNative(
   const deltaW = 2.25;
 
   drawCpBarChart(
+    pptx,
     slide,
     tv,
     engRows,
@@ -7445,6 +7469,7 @@ export function createIcIgCpEngNative(
     rowH,
   );
   drawDeltaPanel(
+    pptx,
     slide,
     tv,
     'Avg Engagement \u0394',
@@ -7457,6 +7482,7 @@ export function createIcIgCpEngNative(
   );
 
   drawCpBarChart(
+    pptx,
     slide,
     tv,
     postRows,
@@ -7469,6 +7495,7 @@ export function createIcIgCpEngNative(
     rowH,
   );
   drawDeltaPanel(
+    pptx,
     slide,
     tv,
     'Total Post \u0394',
@@ -7665,6 +7692,8 @@ export function createIcTwGrowthNative(
     h: chartsH,
     label: 'Analysis',
     text: data.insight || '',
+    fontSize: 6.5,
+    recFontSize: 6.5,
   });
 
   const tableY = bodyY + chartsH + tableGap;
@@ -7965,33 +7994,35 @@ export function createIcTwBestLeastNative(
     align: 'left',
     valign: 'middle',
   });
-  const insightText = data.insight
-    ? data.insight
-        .split('\n')
-        .filter(Boolean)
-        .map((l) =>
-          l
-            .replace(/\*\*(.*?)\*\*/g, '$1')
-            .replace(/^[-•]\s*/, '• ')
-            .trim(),
-        )
-        .join('\n')
-    : 'No insight generated.';
-  slide.addText(insightText, {
-    x: rightX + 0.08,
-    y: bodyY + 0.18,
-    w: rightW - 0.16,
-    h: bodyH - 0.22,
-    fontSize: 6.5,
-    color: data.insight ? textColor : mutedColor,
-    fontFace: font,
-    align: 'left',
-    valign: 'top',
-    italic: !data.insight,
-    paraSpaceAfter: 4,
-    lineSpacingMultiple: 1.2,
-    wrap: true,
-  });
+  if (data.insight) {
+    const richRuns = parseInsightRichText(data.insight, tv, 6.5, font, 6.5);
+    slide.addText(richRuns as any, {
+      x: rightX + 0.08,
+      y: bodyY + 0.18,
+      w: rightW - 0.16,
+      h: bodyH - 0.22,
+      fontFace: font,
+      align: 'left',
+      valign: 'top',
+      paraSpaceAfter: 4,
+      lineSpacingMultiple: 1.2,
+      wrap: true,
+    });
+  } else {
+    slide.addText('No insight generated.', {
+      x: rightX + 0.08,
+      y: bodyY + 0.18,
+      w: rightW - 0.16,
+      h: bodyH - 0.22,
+      fontSize: 6.5,
+      color: mutedColor,
+      fontFace: font,
+      align: 'left',
+      valign: 'top',
+      italic: true,
+      wrap: true,
+    });
+  }
 
   drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
 }
@@ -8319,33 +8350,35 @@ export function createIcTwContentNative(
     align: 'left',
     valign: 'middle',
   });
-  const insightText = data.insight
-    ? data.insight
-        .split('\n')
-        .filter(Boolean)
-        .map((l) =>
-          l
-            .replace(/\*\*(.*?)\*\*/g, '$1')
-            .replace(/^[-•]\s*/, '• ')
-            .trim(),
-        )
-        .join('\n')
-    : 'No insight generated.';
-  slide.addText(insightText, {
-    x: rightX + 0.08,
-    y: bodyY + 0.18,
-    w: rightW - 0.16,
-    h: bodyH - 0.22,
-    fontSize: 6.5,
-    color: data.insight ? textColor : mutedColor,
-    fontFace: font,
-    align: 'left',
-    valign: 'top',
-    italic: !data.insight,
-    paraSpaceAfter: 4,
-    lineSpacingMultiple: 1.2,
-    wrap: true,
-  });
+  if (data.insight) {
+    const richRuns = parseInsightRichText(data.insight, tv, 6.5, font, 6.5);
+    slide.addText(richRuns as any, {
+      x: rightX + 0.08,
+      y: bodyY + 0.18,
+      w: rightW - 0.16,
+      h: bodyH - 0.22,
+      fontFace: font,
+      align: 'left',
+      valign: 'top',
+      paraSpaceAfter: 4,
+      lineSpacingMultiple: 1.2,
+      wrap: true,
+    });
+  } else {
+    slide.addText('No insight generated.', {
+      x: rightX + 0.08,
+      y: bodyY + 0.18,
+      w: rightW - 0.16,
+      h: bodyH - 0.22,
+      fontSize: 6.5,
+      color: mutedColor,
+      fontFace: font,
+      align: 'left',
+      valign: 'top',
+      italic: true,
+      wrap: true,
+    });
+  }
 
   drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
 }
@@ -8549,6 +8582,8 @@ export function createIcFbGrowthNative(
     h: chartsH,
     label: 'Analysis',
     text: data.insight || '',
+    fontSize: 6.5,
+    recFontSize: 6.5,
   });
 
   // Summary table (bottom)
@@ -8665,14 +8700,12 @@ interface IcCompOverviewExportData {
   totalPages: number;
 }
 
-/** Format compact number (K/M) */
+/** Format number (exact from database) */
 function _fmtNC(v: number | null): string {
   if (v === null || v === undefined) return '-';
   const n = Number(v);
   if (isNaN(n)) return '-';
-  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (Math.abs(n) >= 1_000) return (n / 1_000).toFixed(1) + 'K';
-  return Math.round(n).toLocaleString();
+  return n.toLocaleString();
 }
 
 /** Format growth percentage — fraction heuristic same as slide */
@@ -8894,7 +8927,8 @@ export function createIcCompOverviewNative(
   const footerTop = 5.15;
   const insightH = 1.4;
   const insightGap = 0.1;
-  const tablesH = footerTop - bodyY - insightH - insightGap - 0.05;
+  // Lift analysis box up by shrinking table area slightly.
+  const tablesH = footerTop - bodyY - insightH - insightGap - 0.17;
 
   const tblGap = 0.1;
   const tblW = (contentW - 2 * tblGap) / 3;
@@ -8980,6 +9014,8 @@ export function createIcCompOverviewNative(
     h: insightH,
     label: 'Analysis & Insights',
     text: data.insight || '',
+    fontSize: 7,
+    recFontSize: 7,
   });
 
   drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
@@ -9006,7 +9042,7 @@ interface IcCompDetailExportData {
     image_url?: string | null;
   }[];
   twPosts: { engagement_b: number | null; url: string | null; image_url?: string | null }[];
-  narrative: string;
+  insight: string;
   currentPage: number;
   totalPages: number;
 }
@@ -9053,7 +9089,7 @@ export function createIcCompDetailNative(
   const footerTop = 5.15;
   const bodyH = footerTop - bodyY - 0.05;
 
-  const narrativeW = 2.1;
+  const narrativeW = 2.35;
   const narrativeGap = 0.12;
   const postsX = contentX;
   const postsW = contentW - narrativeW - narrativeGap;
@@ -9321,17 +9357,33 @@ export function createIcCompDetailNative(
     valign: 'middle',
   });
   // Text content
-  slide.addText(data.narrative || (isDark ? '' : 'Add analysis here\u2026'), {
-    x: narrativeX + 0.1,
-    y: bodyY + 0.35,
-    w: narrativeW - 0.2,
-    h: bodyH - 0.42,
-    fontSize: 7.5,
-    color: data.narrative ? textColor : mutedColor,
-    fontFace: font,
-    valign: 'top',
-    wrap: true,
-  });
+  if (data.insight) {
+    const richRuns = parseInsightRichText(data.insight, tv, 7, font, 7);
+    slide.addText(richRuns as any, {
+      x: narrativeX + 0.1,
+      y: bodyY + 0.35,
+      w: narrativeW - 0.2,
+      h: bodyH - 0.42,
+      fontSize: 7,
+      color: textColor,
+      fontFace: font,
+      valign: 'top',
+      lineSpacingMultiple: 1.25,
+      wrap: true,
+    });
+  } else {
+    slide.addText(isDark ? '' : 'Add analysis here\u2026', {
+      x: narrativeX + 0.1,
+      y: bodyY + 0.35,
+      w: narrativeW - 0.2,
+      h: bodyH - 0.42,
+      fontSize: 7,
+      color: mutedColor,
+      fontFace: font,
+      valign: 'top',
+      wrap: true,
+    });
+  }
 
   drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
 }
@@ -9368,7 +9420,7 @@ interface IcCompIgFocusExportData {
     ig_engagement_b_growth: number | null;
     er_folls: number | null;
   } | null;
-  narrative: string;
+  insight: string;
   currentPage: number;
   totalPages: number;
 }
@@ -9402,7 +9454,7 @@ export function createIcCompIgFocusNative(
   const footerTop = 5.15;
   const bodyH = footerTop - bodyY - 0.05;
 
-  const narrativeW = 2.0;
+  const narrativeW = 2.3;
   const narrativeGap = 0.1;
   const leftW = contentW - narrativeW - narrativeGap;
   const leftX = contentX;
@@ -9736,17 +9788,33 @@ export function createIcCompIgFocusNative(
     align: 'left',
     valign: 'middle',
   });
-  slide.addText(data.narrative || 'Add Instagram analysis here\u2026', {
-    x: narrativeX + 0.1,
-    y: bodyY + 0.35,
-    w: narrativeW - 0.2,
-    h: bodyH - 0.42,
-    fontSize: 7.5,
-    color: data.narrative ? textColor : mutedColor,
-    fontFace: font,
-    valign: 'top',
-    wrap: true,
-  });
+  if (data.insight) {
+    const richRuns = parseInsightRichText(data.insight, tv, 7, font, 7);
+    slide.addText(richRuns as any, {
+      x: narrativeX + 0.1,
+      y: bodyY + 0.35,
+      w: narrativeW - 0.2,
+      h: bodyH - 0.42,
+      fontSize: 7,
+      color: textColor,
+      fontFace: font,
+      valign: 'top',
+      lineSpacingMultiple: 1.25,
+      wrap: true,
+    });
+  } else {
+    slide.addText('Add Instagram analysis here\u2026', {
+      x: narrativeX + 0.1,
+      y: bodyY + 0.35,
+      w: narrativeW - 0.2,
+      h: bodyH - 0.42,
+      fontSize: 7,
+      color: mutedColor,
+      fontFace: font,
+      valign: 'top',
+      wrap: true,
+    });
+  }
 
   drawNativeFooter(slide, pptx, config, primaryColor, font, data.currentPage, data.totalPages);
 }
@@ -9802,6 +9870,7 @@ export function createIcIgCpReachNative(
   const deltaW = 2.25;
 
   drawCpBarChart(
+    pptx,
     slide,
     tv,
     reachRows,
@@ -9814,6 +9883,7 @@ export function createIcIgCpReachNative(
     rowH,
   );
   drawDeltaPanel(
+    pptx,
     slide,
     tv,
     'Avg Reach \u0394',
@@ -9826,6 +9896,7 @@ export function createIcIgCpReachNative(
   );
 
   drawCpBarChart(
+    pptx,
     slide,
     tv,
     erRows,
@@ -9838,6 +9909,7 @@ export function createIcIgCpReachNative(
     rowH,
   );
   drawDeltaPanel(
+    pptx,
     slide,
     tv,
     'Avg ER Reach \u0394',

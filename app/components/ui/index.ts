@@ -9,3 +9,4 @@ export { AiPromptModal } from './AiPromptModal';
 export { ContentSelectionModal } from './ContentSelectionModal';
 export { SlideFooter } from './SlideFooter';
 export { ChannelIndicator, ChannelBadge } from './ChannelIndicator';
+export { AppSidebar } from './AppSidebar';

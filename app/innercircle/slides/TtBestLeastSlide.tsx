@@ -1,13 +1,18 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { TrendingUp, TrendingDown, Sparkles, Loader2, Send, ExternalLink } from 'lucide-react';
+import { TrendingUp, TrendingDown, Sparkles, Loader2, ExternalLink } from 'lucide-react';
 import { ReportConfig } from '@/app/types';
 import { SlideFooter } from '@/app/components/ui/SlideFooter';
 import { ChannelBadge } from '@/app/components/ui';
 import { generateLayoutTheme } from '@/app/utils/themeStyles';
 import { generateGeminiContent } from '@/app/utils/api';
-import { renderTextWithHighlights } from '@/app/utils/helpers';
+import {
+  TT_BEST_LEAST_ANALYST_SYSTEM_PROMPT,
+  buildTtBestLeastPrompt,
+  parseTtBestLeastInsight,
+  ParsedInsight,
+} from '@/app/innercircle/prompts/ttBestLeastPrompt';
 
 // tiktok_page_18.py (organic) + tiktok_page_19.py (paid)
 // Layout: Highest 3 (top-left) | Lowest 3 (bottom-left) | Insight (right)
@@ -29,14 +34,14 @@ interface Props {
   isThumbnail?: boolean;
   currentPage?: number;
   totalPages?: number;
+  savedInsight?: string;
+  onInsightChange?: (value: string) => void;
 }
 
 function fmtN(v: number | null | undefined): string {
   if (v === null || v === undefined) return '-';
   const n = Number(v);
   if (isNaN(n)) return '-';
-  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (Math.abs(n) >= 1_000) return (n / 1_000).toFixed(1) + 'K';
   return n.toLocaleString();
 }
 
@@ -45,24 +50,89 @@ function fmtVR(v: number | null | undefined): string {
   return `${Number(v).toFixed(2)}%`;
 }
 
+// Inline bold renderer — splits on **text** markers
+const renderBoldInline = (text: string, color: string) =>
+  text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
+    part.startsWith('**') ? (
+      <span key={i} className="font-bold" style={{ color }}>
+        {part.slice(2, -2)}
+      </span>
+    ) : (
+      <span key={i}>{part}</span>
+    ),
+  );
+
+// Parsed insight view component
+const InsightView: React.FC<{
+  parsed: ParsedInsight;
+  isDark: boolean;
+  colorPrimary: string;
+  onEdit: () => void;
+}> = ({ parsed, isDark, colorPrimary, onEdit }) => {
+  const bodyColor = isDark ? '#cbd5e1' : '#475569';
+  const labelColor = isDark ? '#e2e8f0' : '#374151';
+  return (
+    <div
+      data-ic-insight
+      className="flex flex-col gap-1 w-full min-w-0 cursor-pointer"
+      onClick={onEdit}
+    >
+      {parsed.analysis && (
+        <div
+          className="text-[8px] leading-relaxed break-words"
+          style={{ color: bodyColor, overflowWrap: 'break-word' }}
+        >
+          {renderBoldInline(parsed.analysis, colorPrimary)}
+        </div>
+      )}
+      {parsed.recommendations.length > 0 && (
+        <div className="flex flex-col gap-0.5 w-full min-w-0">
+          {parsed.recommendations.map((rec) => (
+            <div
+              key={rec.type}
+              className="text-[7.5px] leading-snug break-words"
+              style={{ color: bodyColor, overflowWrap: 'break-word' }}
+            >
+              <span className="font-bold" style={{ color: labelColor }}>
+                • {rec.type}:{' '}
+              </span>
+              {renderBoldInline(rec.text, colorPrimary)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const TtBestLeastSlide: React.FC<Props> = ({
   config,
   mode = 'organic',
   isThumbnail = false,
   currentPage,
   totalPages,
+  savedInsight,
+  onInsightChange,
 }) => {
   const [highest, setHighest] = useState<TtPost[]>([]);
   const [lowest, setLowest] = useState<TtPost[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [insight, setInsight] = useState('');
+  const [insight, setInsight] = useState<string>(() => savedInsight || '');
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [showAiInput, setShowAiInput] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState('');
+
+  const parsed: ParsedInsight = React.useMemo(
+    () => parseTtBestLeastInsight(insight),
+    [insight],
+  );
+
+  const persistInsight = (val: string) => {
+    setInsight(val);
+    onInsightChange?.(val);
+  };
 
   useEffect(() => {
     if (!config.clientName || isThumbnail) return;
@@ -91,26 +161,31 @@ export const TtBestLeastSlide: React.FC<Props> = ({
   const colorPrimary = theme.colors.primary;
   const modeLabel = mode === 'paid' ? 'Paid' : 'Organic';
 
-  const handleGenerate = async (e?: React.FormEvent) => {
-    e?.preventDefault();
+  const handleGenerate = async () => {
+    if (highest.length === 0 && lowest.length === 0) return;
     setIsGenerating(true);
-    setShowAiInput(false);
     try {
-      const hAvg = highest.length
-        ? fmtN(highest.reduce((s, p) => s + (p.views ?? 0), 0) / highest.length)
-        : '-';
-      const lAvg = lowest.length
-        ? fmtN(lowest.reduce((s, p) => s + (p.views ?? 0), 0) / lowest.length)
-        : '-';
-      const text = await generateGeminiContent(
-        `Analyze TikTok ${modeLabel} best/least posts for ${config.clientName} (${config.period}).\nHighest ${highest.length} posts avg views: ${hAvg}\nLowest ${lowest.length} posts avg views: ${lAvg}\n${aiPrompt ? `Focus: ${aiPrompt}` : ''}\nWrite 2-3 SHORT bullet points (start each with -). Use **bold** for key numbers.`,
-      );
-      setInsight(text);
+      const promptData = {
+        highest: highest.map((p, i) => ({
+          rank: i + 1,
+          views: fmtN(p.views),
+          engagement: fmtN(p.engagement),
+          vr_rate: fmtVR(p.vr_rate).replace('%', ''),
+        })),
+        lowest: lowest.map((p, i) => ({
+          rank: i + 1,
+          views: fmtN(p.views),
+          engagement: fmtN(p.engagement),
+          vr_rate: fmtVR(p.vr_rate).replace('%', ''),
+        })),
+      };
+      const prompt = buildTtBestLeastPrompt(config.clientName, config.period, promptData);
+      const text = await generateGeminiContent(prompt, TT_BEST_LEAST_ANALYST_SYSTEM_PROMPT);
+      persistInsight(text);
     } catch {
-      setInsight('Failed to generate insight.');
+      persistInsight('Failed to generate insight.');
     } finally {
       setIsGenerating(false);
-      setAiPrompt('');
     }
   };
 
@@ -325,7 +400,7 @@ export const TtBestLeastSlide: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Right: Insight only (full height) */}
+        {/* Right: Analysis panel (full height) */}
         <div className="flex flex-col shrink-0 min-h-0" style={{ width: '28%' }}>
           <div className="flex items-center gap-0.5 shrink-0 mb-1" style={{ height: 20 }}>
             <Sparkles size={7} style={{ color: colorPrimary }} />
@@ -343,6 +418,7 @@ export const TtBestLeastSlide: React.FC<Props> = ({
               borderColor: theme.border,
             }}
           >
+            {/* Header bar */}
             <div
               className="flex items-center justify-between px-1.5 py-0.5 border-b shrink-0"
               style={{ borderColor: theme.border }}
@@ -372,7 +448,7 @@ export const TtBestLeastSlide: React.FC<Props> = ({
                 {isEditing && (
                   <button
                     onClick={() => {
-                      setInsight(editValue);
+                      persistInsight(editValue);
                       setIsEditing(false);
                     }}
                     className="text-[5.5px] px-1 py-0.5 rounded-full border"
@@ -381,77 +457,56 @@ export const TtBestLeastSlide: React.FC<Props> = ({
                     Done
                   </button>
                 )}
-                <button
-                  onClick={() => {
-                    setShowAiInput(!showAiInput);
-                    setIsEditing(false);
-                  }}
-                  className="flex items-center gap-0.5 px-1 py-0.5 rounded-full text-[5.5px] border"
-                  style={{
-                    backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#eef2ff',
-                    color: isDark ? '#94a3b8' : '#6366f1',
-                    borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#c7d2fe',
-                  }}
-                >
-                  <Sparkles size={5} />
-                  <span>AI</span>
-                </button>
+                {!isEditing && (
+                  <button
+                    onClick={handleGenerate}
+                    disabled={isGenerating}
+                    className="flex items-center gap-0.5 px-1 py-0.5 rounded-full text-[5.5px] border disabled:opacity-50"
+                    style={{
+                      backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#eef2ff',
+                      color: isDark ? '#94a3b8' : '#6366f1',
+                      borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#c7d2fe',
+                    }}
+                  >
+                    {isGenerating ? <Loader2 size={5} className="animate-spin" /> : <Sparkles size={5} />}
+                    <span>AI</span>
+                  </button>
+                )}
               </div>
             </div>
-            {showAiInput && (
-              <form
-                onSubmit={handleGenerate}
-                className="flex gap-0.5 px-1 py-0.5 border-b shrink-0"
-                style={{
-                  backgroundColor: isDark ? 'rgba(99,102,241,0.08)' : '#eef2ff',
-                  borderColor: isDark ? 'rgba(99,102,241,0.2)' : '#c7d2fe',
-                }}
-              >
-                <input
-                  type="text"
-                  value={aiPrompt}
-                  onChange={(e) => setAiPrompt(e.target.value)}
-                  placeholder="Optional focus…"
-                  className="flex-1 text-[5.5px] px-1 py-0.5 rounded border focus:outline-none"
-                  style={{
-                    background: isDark ? 'rgba(255,255,255,0.08)' : '#fff',
-                    borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#c7d2fe',
-                    color: isDark ? '#fff' : '#374151',
-                  }}
-                />
-                <button
-                  type="submit"
-                  disabled={isGenerating}
-                  className="bg-indigo-600 text-white px-1 rounded disabled:opacity-50 flex items-center"
-                >
-                  {isGenerating ? <Loader2 size={6} className="animate-spin" /> : <Send size={6} />}
-                </button>
-              </form>
-            )}
+
+            {/* Content */}
             <div className="px-1.5 py-1 flex-1 overflow-y-auto">
               {isGenerating ? (
                 <div className="flex items-center gap-1 opacity-60">
                   <Sparkles size={6} className="text-indigo-500 animate-spin" />
-                  <span className="text-[6px] text-indigo-500 animate-pulse">Analyzing…</span>
+                  <span className="text-[8px] text-indigo-500 animate-pulse">Analyzing…</span>
                 </div>
               ) : isEditing ? (
                 <textarea
                   value={editValue}
                   onChange={(e) => setEditValue(e.target.value)}
                   autoFocus
-                  className="w-full h-full resize-none text-[6px] leading-relaxed focus:outline-none bg-transparent"
+                  className="w-full h-full resize-none text-[8px] leading-relaxed focus:outline-none bg-transparent"
                   style={{ color: isDark ? '#cbd5e1' : '#374151' }}
                 />
               ) : insight ? (
-                <div
-                  className="text-[6px] leading-relaxed"
-                  style={{ color: isDark ? '#cbd5e1' : '#475569' }}
-                >
-                  {renderTextWithHighlights(insight, isDark, colorPrimary)}
-                </div>
+                <InsightView
+                  parsed={parsed}
+                  isDark={isDark}
+                  colorPrimary={colorPrimary}
+                  onEdit={() => {
+                    setEditValue(insight);
+                    setIsEditing(true);
+                  }}
+                />
               ) : (
-                <span className="text-[6px]" style={{ color: isDark ? '#4b5563' : '#94a3b8' }}>
-                  Click AI to generate, or Edit to type.
+                <span
+                  className="text-[8px] cursor-pointer"
+                  style={{ color: isDark ? '#4b5563' : '#94a3b8' }}
+                  onClick={handleGenerate}
+                >
+                  Click AI to generate.
                 </span>
               )}
             </div>
@@ -476,6 +531,7 @@ export const TtBestLeastSlide: React.FC<Props> = ({
           totalPages={totalPages ?? 1}
           logo={config.coverDesign?.logoData}
           brandColor={config.coverDesign?.colors?.primary}
+          preparedBy={config.preparedBy}
         />
       </div>
     </div>

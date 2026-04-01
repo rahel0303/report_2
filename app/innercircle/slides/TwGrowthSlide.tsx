@@ -13,13 +13,17 @@ import {
   ResponsiveContainer,
   BarChart,
 } from 'recharts';
-import { BarChart2, Sparkles, Loader2, Send } from 'lucide-react';
+import { BarChart2, Sparkles, Loader2 } from 'lucide-react';
 import { ReportConfig } from '@/app/types';
 import { SlideFooter } from '@/app/components/ui/SlideFooter';
 import { ChannelBadge } from '@/app/components/ui';
 import { generateLayoutTheme } from '@/app/utils/themeStyles';
 import { generateGeminiContent } from '@/app/utils/api';
-import { renderTextWithHighlights } from '@/app/utils/helpers';
+import {
+  TW_GROWTH_ANALYST_SYSTEM_PROMPT,
+  buildTwGrowthPrompt,
+  parseTwGrowthInsight,
+} from '@/app/innercircle/prompts/twGrowthPrompt';
 
 // twitter_page_22.py — New Follows (left) + Impressions (right) dual-axis + Engagement bar + overview table
 
@@ -63,8 +67,6 @@ function shortDate(d: string): string {
 }
 
 function fmtK(n: number): string {
-  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (Math.abs(n) >= 1_000) return (n / 1_000).toFixed(0) + 'K';
   return n.toLocaleString();
 }
 
@@ -81,12 +83,10 @@ export const TwGrowthSlide: React.FC<Props> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [insight, setInsight] = useState(savedInsight || '');
+  const [insight, setInsight] = useState<string>(() => savedInsight || '');
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [showAiInput, setShowAiInput] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState('');
 
   useEffect(() => {
     if (!config.clientName || isThumbnail) return;
@@ -119,27 +119,24 @@ export const TwGrowthSlide: React.FC<Props> = ({
     [chartData],
   );
 
-  const handleGenerate = async (e?: React.FormEvent) => {
-    e?.preventDefault();
+  const handleGenerate = async () => {
     setIsGenerating(true);
-    setShowAiInput(false);
     try {
-      const ctx = tableRows
-        .map(
-          (r) =>
-            `${r.month}: Posts=${r.post_count}, Followers Growth=${r.followers_growth}, Impressions=${r.impressions}, Engagement=${r.engagement}`,
-        )
-        .join('\n');
-      const text = await generateGeminiContent(
-        `Analyze Twitter/X growth for ${config.clientName} (${config.period}):\n${ctx}\n${aiPrompt ? `Focus: ${aiPrompt}` : ''}\nWrite 2-3 SHORT bullet points (start each with -). Use **bold** for key numbers.`,
-      );
+      const promptRows = tableRows.map((r) => ({
+        month: r.month,
+        post_count: r.post_count,
+        followers_growth: r.followers_growth,
+        impressions: r.impressions,
+        engagement: r.engagement,
+      }));
+      const prompt = buildTwGrowthPrompt(config.clientName, config.period, promptRows);
+      const text = await generateGeminiContent(prompt, TW_GROWTH_ANALYST_SYSTEM_PROMPT);
       setInsight(text);
       onInsightChange?.(text);
     } catch {
       setInsight('Failed to generate insight.');
     } finally {
       setIsGenerating(false);
-      setAiPrompt('');
     }
   };
 
@@ -382,130 +379,88 @@ export const TwGrowthSlide: React.FC<Props> = ({
                   <div className="flex items-center gap-1">
                     {insight && !isEditing && (
                       <button
-                        onClick={() => {
-                          setEditValue(insight);
-                          setIsEditing(true);
-                          setShowAiInput(false);
-                        }}
+                        onClick={() => { setEditValue(insight); setIsEditing(true); }}
                         className={`text-[9px] font-medium px-2 py-0.5 rounded-full border transition-all ${isDark ? 'text-slate-400 border-white/10 hover:bg-white/10' : 'text-slate-500 border-slate-200 hover:bg-slate-50'}`}
                       >
                         Edit
                       </button>
                     )}
-                    <button
-                      onClick={() => {
-                        setShowAiInput(!showAiInput);
-                        setIsEditing(false);
-                      }}
-                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium border transition-all ${showAiInput ? (isDark ? 'bg-indigo-500/30 text-indigo-300 border-indigo-500/50' : 'bg-indigo-100 text-indigo-700 border-indigo-200') : isDark ? 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10' : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100'}`}
-                    >
-                      <Sparkles size={9} />
-                      <span>{showAiInput ? 'Close' : 'AI'}</span>
-                    </button>
+                    {!isEditing && (
+                      <button
+                        onClick={handleGenerate}
+                        disabled={isGenerating}
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium border transition-all disabled:opacity-50 ${isDark ? 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10' : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100'}`}
+                      >
+                        {isGenerating ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />}
+                        <span>AI</span>
+                      </button>
+                    )}
                   </div>
                 </div>
-                {showAiInput && (
-                  <div
-                    className="px-3 py-2 border-b shrink-0"
-                    style={{
-                      backgroundColor: isDark ? 'rgba(99,102,241,0.1)' : '#eef2ff',
-                      borderColor: isDark ? 'rgba(99,102,241,0.3)' : '#c7d2fe',
-                    }}
-                  >
-                    <form onSubmit={handleGenerate} className="flex gap-2">
-                      <input
-                        type="text"
-                        value={aiPrompt}
-                        onChange={(e) => setAiPrompt(e.target.value)}
-                        placeholder="Optional focus…"
-                        maxLength={150}
-                        className={`flex-1 text-[10px] px-2 py-1 rounded border focus:outline-none ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-white border-indigo-200 text-slate-700'}`}
-                      />
-                      <button
-                        type="submit"
-                        disabled={isGenerating}
-                        className="bg-indigo-600 text-white px-2.5 rounded hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center"
-                      >
-                        {isGenerating ? (
-                          <Loader2 size={10} className="animate-spin" />
-                        ) : (
-                          <Send size={10} />
-                        )}
-                      </button>
-                    </form>
-                  </div>
-                )}
                 <div className="flex-1 overflow-auto p-3 min-h-0">
                   {isGenerating ? (
                     <div className="flex flex-col items-center justify-center h-full gap-2 opacity-70">
                       <Sparkles size={20} className="text-indigo-500 animate-spin" />
-                      <span className="text-[10px] text-indigo-500 font-medium animate-pulse">
-                        Analyzing…
-                      </span>
+                      <span className="text-[10px] text-indigo-500 font-medium animate-pulse">Analyzing…</span>
                     </div>
                   ) : isEditing ? (
                     <div className="h-full flex flex-col gap-2">
                       <textarea
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
-                        maxLength={500}
+                        maxLength={600}
                         autoFocus
                         className={`flex-1 text-[11px] leading-relaxed p-2 rounded border focus:outline-none resize-none w-full ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                         placeholder="Type your analysis here…"
                       />
                       <div className="flex justify-end gap-2 shrink-0">
-                        <button
-                          onClick={() => setIsEditing(false)}
-                          className={`text-[9px] px-3 py-1 rounded border ${isDark ? 'border-white/20 text-slate-400' : 'border-slate-200 text-slate-500'}`}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={() => {
-                            setInsight(editValue);
-                            onInsightChange?.(editValue);
-                            setIsEditing(false);
-                          }}
-                          className="text-[9px] px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700"
-                        >
-                          Save
-                        </button>
+                        <button onClick={() => setIsEditing(false)} className={`text-[9px] px-3 py-1 rounded border ${isDark ? 'border-white/20 text-slate-400' : 'border-slate-200 text-slate-500'}`}>Cancel</button>
+                        <button onClick={() => { setInsight(editValue); onInsightChange?.(editValue); setIsEditing(false); }} className="text-[9px] px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">Save</button>
                       </div>
                     </div>
                   ) : insight ? (
                     <div
                       data-ic-insight
-                      className={`text-[11px] leading-relaxed font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => {
-                        setEditValue(insight);
-                        setIsEditing(true);
-                      }}
+                      className="flex flex-col gap-1.5 cursor-pointer"
+                      onClick={() => { setEditValue(insight); setIsEditing(true); }}
                     >
-                      {renderTextWithHighlights(insight, isDark, colorPrimary)}
+                      {(() => {
+                        const parsed = parseTwGrowthInsight(insight);
+                        const bodyColor = isDark ? '#cbd5e1' : '#475569';
+                        const labelColor = isDark ? '#e2e8f0' : '#374151';
+                        const renderBold = (text: string) =>
+                          text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
+                            part.startsWith('**') ? (
+                              <span key={i} className="font-bold" style={{ color: colorPrimary }}>{part.slice(2, -2)}</span>
+                            ) : (
+                              <span key={i}>{part}</span>
+                            ),
+                          );
+                        return (
+                          <>
+                            {parsed.analysis && (
+                              <div className="text-[11px] leading-relaxed font-medium" style={{ color: bodyColor }}>
+                                {renderBold(parsed.analysis)}
+                              </div>
+                            )}
+                            {parsed.recommendations.map((rec) => (
+                              <div key={rec.type} className="text-[10px] leading-snug" style={{ color: bodyColor }}>
+                                <span className="font-bold" style={{ color: labelColor }}>• {rec.type}: </span>
+                                {renderBold(rec.text)}
+                              </div>
+                            ))}
+                          </>
+                        );
+                      })()}
                     </div>
                   ) : (
-                    <div
-                      className="flex flex-col items-center justify-center h-full gap-3 cursor-pointer group"
-                      onClick={() => {
-                        setEditValue('');
-                        setIsEditing(true);
-                      }}
-                    >
-                      <div
-                        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all group-hover:scale-105 ${isDark ? 'bg-white/10' : 'bg-indigo-50'}`}
-                      >
+                    <div className="flex flex-col items-center justify-center h-full gap-3 cursor-pointer group" onClick={() => { setEditValue(''); setIsEditing(true); }}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all group-hover:scale-105 ${isDark ? 'bg-white/10' : 'bg-indigo-50'}`}>
                         <Sparkles size={16} style={{ color: colorPrimary }} />
                       </div>
                       <div className="text-center">
-                        <p
-                          className={`text-[10px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
-                        >
-                          Add Analysis
-                        </p>
-                        <p className={`text-[9px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                          Click to write or use AI
-                        </p>
+                        <p className={`text-[10px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Click AI to generate</p>
+                        <p className={`text-[9px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>or click to write manually</p>
                       </div>
                     </div>
                   )}
@@ -634,6 +589,7 @@ export const TwGrowthSlide: React.FC<Props> = ({
           totalPages={totalPages ?? 1}
           logo={config.coverDesign?.logoData}
           brandColor={config.coverDesign?.colors?.primary}
+          preparedBy={config.preparedBy}
         />
       </div>
     </div>

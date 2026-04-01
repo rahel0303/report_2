@@ -10,11 +10,17 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { ExternalLink, Loader2 } from 'lucide-react';
+import { ExternalLink, Loader2, Sparkles } from 'lucide-react';
 import { ReportConfig } from '@/app/types';
 import { SlideFooter } from '@/app/components/ui/SlideFooter';
 import { ChannelBadge } from '@/app/components/ui';
 import { generateLayoutTheme } from '@/app/utils/themeStyles';
+import { generateGeminiContent } from '@/app/utils/api';
+import {
+  COMP_IG_FOCUS_ANALYST_SYSTEM_PROMPT,
+  buildCompIgFocusPrompt,
+  parseCompIgFocusInsight,
+} from '@/app/innercircle/prompts/compIgFocusPrompt';
 
 // competitor_instagram_focus.py equivalent
 // Chapter 7: Competitor Instagram Focus
@@ -65,14 +71,14 @@ interface Props {
   isThumbnail?: boolean;
   currentPage?: number;
   totalPages?: number;
+  savedInsight?: string;
+  onInsightChange?: (value: string) => void;
 }
 
 // ── Formatters ───────────────────────────────────────────────────────────────
 function fmtN(v: number | null): string {
   if (v === null || v === undefined || isNaN(v)) return '-';
-  if (Math.abs(v) >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M';
-  if (Math.abs(v) >= 1_000) return (v / 1_000).toFixed(1) + 'K';
-  return Math.round(v).toLocaleString();
+  return v.toLocaleString();
 }
 
 function fmtPct(v: number | null): string {
@@ -114,7 +120,9 @@ const MiniPostCard: React.FC<{
       `/api/innercircle/ig-thumbnail?url=${encodeURIComponent(post.permalink)}&channel=instagram`,
     )
       .then((r) => r.json())
-      .then((d) => { if (d.image_url) setImageUrl(d.image_url); })
+      .then((d) => {
+        if (d.image_url) setImageUrl(d.image_url);
+      })
       .catch(() => {})
       .finally(() => setImgLoading(false));
   }, [post.permalink, post.image_url]);
@@ -142,7 +150,9 @@ const MiniPostCard: React.FC<{
             className="absolute inset-0 flex items-center justify-center"
             style={{ backgroundColor: isDark ? '#1e293b' : '#f1f5f9' }}
           >
-            {imgLoading && <Loader2 size={14} className="animate-spin" style={{ color: IG_COLOR }} />}
+            {imgLoading && (
+              <Loader2 size={14} className="animate-spin" style={{ color: IG_COLOR }} />
+            )}
           </div>
         )}
         {/* Rank badge */}
@@ -279,6 +289,8 @@ export const CompetitorIgFocusSlide: React.FC<Props> = ({
   isThumbnail = false,
   currentPage,
   totalPages,
+  savedInsight,
+  onInsightChange,
 }) => {
   const [top3, setTop3] = useState<IgPost[]>([]);
   const [growthSeries, setGrowthSeries] = useState<GrowthPoint[]>([]);
@@ -286,8 +298,11 @@ export const CompetitorIgFocusSlide: React.FC<Props> = ({
   const [compRow, setCompRow] = useState<CompRow | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [narrative, setNarrative] = useState('');
-  const [editingNarrative, setEditingNarrative] = useState(false);
+
+  const [narrative, setNarrative] = useState<string>(() => savedInsight || '');
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
     if (!config.clientName || !competitor || isThumbnail) return;
@@ -319,6 +334,61 @@ export const CompetitorIgFocusSlide: React.FC<Props> = ({
   const textColor = isDark ? '#e2e8f0' : '#1e293b';
   const mutedColor = isDark ? '#94a3b8' : '#64748b';
   const cardBg = isDark ? 'rgba(255,255,255,0.03)' : '#ffffff';
+
+  const persistNarrative = (text: string) => {
+    setNarrative(text);
+    onInsightChange?.(text);
+  };
+
+  const handleGenerate = async () => {
+    setIsGenerating(true);
+    try {
+      const mainData = mainBrandRow
+        ? {
+            brand: mainBrandRow.brand,
+            followers_growth: fmtN(mainBrandRow.followers_growth),
+            followers_growth_gap: fmtPct(mainBrandRow.followers_growth_gap),
+            post_count: fmtN(mainBrandRow.post_count),
+            post_count_growth: fmtPct(mainBrandRow.post_count_growth),
+            total_engagement: fmtN(mainBrandRow.total_engagement),
+            total_engagement_gap: fmtPct(mainBrandRow.total_engagement_gap),
+            avg_er_folls: fmtER(mainBrandRow.avg_er_folls_b),
+          }
+        : null;
+      const compData = compRow
+        ? {
+            brand: compRow.brand,
+            ig_followers_increase: fmtN(compRow.ig_followers_increase),
+            ig_followers_growth: fmtPct(compRow.ig_followers_growth),
+            post_count: fmtN(compRow.post_count),
+            post_count_growth: fmtPct(compRow.post_count_growth),
+            ig_engagement: fmtN(compRow.ig_engagement_b),
+            ig_engagement_growth: fmtPct(compRow.ig_engagement_b_growth),
+            er_folls: fmtER(compRow.er_folls),
+          }
+        : null;
+      const top3Data = top3.slice(0, 3).map((p, i) => ({
+        rank: i + 1,
+        ig_engagement: fmtN(p.ig_engagement),
+        likes: fmtN(p.likes),
+        comments: fmtN(p.comments),
+        er_folls: fmtER(p.er_folls),
+      }));
+      const prompt = buildCompIgFocusPrompt(
+        config.clientName,
+        config.period,
+        mainData,
+        compData,
+        top3Data,
+      );
+      const text = await generateGeminiContent(prompt, COMP_IG_FOCUS_ANALYST_SYSTEM_PROMPT);
+      persistNarrative(text);
+    } catch {
+      persistNarrative('Failed to generate insight.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   if (isThumbnail) {
     return (
@@ -572,11 +642,12 @@ export const CompetitorIgFocusSlide: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Right: Narrative panel */}
+        {/* Right: AI Analysis panel */}
         <div
           className="w-52 shrink-0 flex flex-col rounded-xl border overflow-hidden"
           style={{ backgroundColor: cardBg, borderColor: theme.border }}
         >
+          {/* Panel header */}
           <div
             className="px-2 py-1.5 flex items-center justify-between shrink-0 border-b"
             style={{
@@ -584,51 +655,156 @@ export const CompetitorIgFocusSlide: React.FC<Props> = ({
               backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#f8fafc',
             }}
           >
-            <span
-              className="text-[8px] font-bold uppercase tracking-wider"
-              style={{ color: colorPrimary }}
-            >
-              {competitor ? `${competitor} Insight` : 'Insight'}
-            </span>
-            <button
-              onClick={() => setEditingNarrative(!editingNarrative)}
-              className="text-[7px] font-medium px-1.5 py-0.5 rounded"
-              style={{
-                color: editingNarrative ? '#6b7280' : colorPrimary,
-                backgroundColor: editingNarrative ? '#f3f4f6' : `${colorPrimary}15`,
-              }}
-            >
-              {editingNarrative ? 'Done' : 'Edit'}
-            </button>
+            <div className="flex items-center gap-1">
+              <Sparkles size={9} style={{ color: colorPrimary }} />
+              <span
+                className="text-[8px] font-bold uppercase tracking-wider"
+                style={{ color: colorPrimary }}
+              >
+                {competitor ? `${competitor} Insight` : 'Insight'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              {narrative && !isEditing && (
+                <button
+                  onClick={() => {
+                    setEditValue(narrative);
+                    setIsEditing(true);
+                  }}
+                  className={`text-[7px] font-medium px-1.5 py-0.5 rounded border ${isDark ? 'text-slate-400 border-white/10 hover:bg-white/10' : 'text-slate-500 border-slate-200 hover:bg-slate-50'}`}
+                >
+                  Edit
+                </button>
+              )}
+              {!isEditing && (
+                <button
+                  onClick={handleGenerate}
+                  disabled={isGenerating}
+                  className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[7px] font-medium border disabled:opacity-50 ${isDark ? 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10' : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100'}`}
+                >
+                  {isGenerating ? (
+                    <Loader2 size={7} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={7} />
+                  )}
+                  <span>AI</span>
+                </button>
+              )}
+            </div>
           </div>
-          {editingNarrative ? (
-            <textarea
-              autoFocus
-              className="flex-1 bg-transparent resize-none outline-none p-2 text-[9px] leading-relaxed"
-              style={{ color: isDark ? '#d1d5db' : '#374151' }}
-              value={narrative}
-              placeholder={`${competitor || 'Competitor'} — Write Instagram analysis here…`}
-              onChange={(e) => setNarrative(e.target.value)}
-              onBlur={() => setEditingNarrative(false)}
-            />
-          ) : (
-            <p
-              className="flex-1 p-2 text-[9px] leading-relaxed cursor-text overflow-auto"
-              style={{
-                color: narrative
-                  ? isDark
-                    ? '#d1d5db'
-                    : '#475569'
-                  : isDark
-                    ? '#4b5563'
-                    : '#94a3b8',
-              }}
-              onClick={() => setEditingNarrative(true)}
-            >
-              {narrative ||
-                `Click to add Instagram analysis for ${competitor || 'this competitor'}…`}
-            </p>
-          )}
+
+          {/* Panel body */}
+          <div className="flex-1 overflow-auto p-2 min-h-0">
+            {isGenerating ? (
+              <div className="flex flex-col items-center justify-center h-full gap-2 opacity-70">
+                <Sparkles size={16} className="text-indigo-500 animate-spin" />
+                <span className="text-[9px] text-indigo-500 font-medium animate-pulse">
+                  Analyzing…
+                </span>
+              </div>
+            ) : isEditing ? (
+              <div className="h-full flex flex-col gap-2">
+                <textarea
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  maxLength={600}
+                  autoFocus
+                  className={`flex-1 text-[9px] leading-relaxed p-1.5 rounded border focus:outline-none resize-none w-full ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                  placeholder="Type your analysis here…"
+                />
+                <div className="flex justify-end gap-1 shrink-0">
+                  <button
+                    onClick={() => setIsEditing(false)}
+                    className={`text-[7px] px-2 py-0.5 rounded border ${isDark ? 'border-white/20 text-slate-400' : 'border-slate-200 text-slate-500'}`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      persistNarrative(editValue);
+                      setIsEditing(false);
+                    }}
+                    className="text-[7px] px-2 py-0.5 rounded bg-indigo-600 text-white hover:bg-indigo-700"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            ) : narrative ? (
+              <div
+                data-ic-insight
+                className="flex flex-col gap-1.5 cursor-pointer"
+                onClick={() => {
+                  setEditValue(narrative);
+                  setIsEditing(true);
+                }}
+              >
+                {(() => {
+                  const parsed = parseCompIgFocusInsight(narrative);
+                  const bodyColor = isDark ? '#cbd5e1' : '#475569';
+                  const labelColor = isDark ? '#e2e8f0' : '#374151';
+                  const renderBold = (text: string) =>
+                    text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
+                      part.startsWith('**') ? (
+                        <span key={i} className="font-bold" style={{ color: colorPrimary }}>
+                          {part.slice(2, -2)}
+                        </span>
+                      ) : (
+                        <span key={i}>{part}</span>
+                      ),
+                    );
+                  return (
+                    <>
+                      {parsed.analysis && (
+                        <div
+                          className="text-[9px] leading-relaxed font-medium"
+                          style={{ color: bodyColor }}
+                        >
+                          {renderBold(parsed.analysis)}
+                        </div>
+                      )}
+                      {parsed.recommendations.map((rec) => (
+                        <div
+                          key={rec.type}
+                          className="text-[8.5px] leading-snug"
+                          style={{ color: bodyColor }}
+                        >
+                          <span className="font-bold" style={{ color: labelColor }}>
+                            • {rec.type}:{' '}
+                          </span>
+                          {renderBold(rec.text)}
+                        </div>
+                      ))}
+                    </>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div
+                className="flex flex-col items-center justify-center h-full gap-2 cursor-pointer group"
+                onClick={() => {
+                  setEditValue('');
+                  setIsEditing(true);
+                }}
+              >
+                <div
+                  className={`w-7 h-7 rounded-full flex items-center justify-center transition-all group-hover:scale-105 ${isDark ? 'bg-white/10' : 'bg-indigo-50'}`}
+                >
+                  <Sparkles size={13} style={{ color: colorPrimary }} />
+                </div>
+                <div className="text-center">
+                  <p
+                    className={`text-[8px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
+                  >
+                    Click AI to generate
+                  </p>
+                  <p className={`text-[7px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    or click to write manually
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -648,7 +824,7 @@ export const CompetitorIgFocusSlide: React.FC<Props> = ({
           growthSeries,
           mainBrandRow,
           compRow,
-          narrative,
+          insight: narrative,
         })}
       />
 
@@ -659,6 +835,7 @@ export const CompetitorIgFocusSlide: React.FC<Props> = ({
         totalPages={totalPages ?? 1}
         logo={config.coverDesign?.logoData}
         brandColor={config.coverDesign?.colors?.primary}
+        preparedBy={config.preparedBy}
       />
     </div>
   );

@@ -1,13 +1,18 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Layers, ArrowRight, Sparkles, Loader2, Send, ExternalLink } from 'lucide-react';
+import { Layers, ArrowRight, Sparkles, Loader2, ExternalLink } from 'lucide-react';
 import { ReportConfig } from '@/app/types';
 import { SlideFooter } from '@/app/components/ui/SlideFooter';
 import { ChannelBadge } from '@/app/components/ui';
 import { generateLayoutTheme } from '@/app/utils/themeStyles';
 import { generateGeminiContent } from '@/app/utils/api';
-import { renderTextWithHighlights } from '@/app/utils/helpers';
+import {
+  TT_CONTENT_PILLAR_ANALYST_SYSTEM_PROMPT,
+  buildTtContentPillarPrompt,
+  parseTtContentPillarInsight,
+  ParsedInsight,
+} from '@/app/innercircle/prompts/ttContentPillarPrompt';
 
 // tiktok_page_20.py — Content Pillar analysis
 // Layout: 2 pillar rows (Lowest → Highest), 3 posts each, insight box per pillar
@@ -32,14 +37,14 @@ interface Props {
   isThumbnail?: boolean;
   currentPage?: number;
   totalPages?: number;
+  savedInsights?: string;
+  onInsightsChange?: (value: string) => void;
 }
 
 function fmtN(v: number | null | undefined): string {
   if (v === null || v === undefined) return '-';
   const n = Number(v);
   if (isNaN(n)) return '-';
-  if (Math.abs(n) >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (Math.abs(n) >= 1_000) return (n / 1_000).toFixed(1) + 'K';
   return n.toLocaleString();
 }
 
@@ -66,21 +71,92 @@ function fmtDate(d: string | null | undefined): string {
   }
 }
 
+// Inline bold renderer
+const renderBoldInline = (text: string, color: string) =>
+  text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
+    part.startsWith('**') ? (
+      <span key={i} className="font-bold" style={{ color }}>
+        {part.slice(2, -2)}
+      </span>
+    ) : (
+      <span key={i}>{part}</span>
+    ),
+  );
+
+// Parsed insight view component
+const PillarInsightView: React.FC<{
+  raw: string;
+  isDark: boolean;
+  colorPrimary: string;
+  onEdit: () => void;
+}> = ({ raw, isDark, colorPrimary, onEdit }) => {
+  const parsed: ParsedInsight = React.useMemo(() => parseTtContentPillarInsight(raw), [raw]);
+  const bodyColor = isDark ? '#cbd5e1' : '#475569';
+  const labelColor = isDark ? '#e2e8f0' : '#374151';
+  return (
+    <div
+      data-ic-insight
+      data-insight-raw={raw}
+      className="flex flex-col gap-1 w-full min-w-0 cursor-pointer"
+      onClick={onEdit}
+    >
+      {parsed.analysis && (
+        <div
+          className="text-[8px] leading-relaxed wrap-break-word"
+          style={{ color: bodyColor, overflowWrap: 'break-word' }}
+        >
+          {renderBoldInline(parsed.analysis, colorPrimary)}
+        </div>
+      )}
+      {parsed.recommendations.length > 0 && (
+        <div className="flex flex-col gap-0.5 w-full min-w-0">
+          {parsed.recommendations.map((rec) => (
+            <div
+              key={rec.type}
+              className="text-[7.5px] leading-snug wrap-break-word"
+              style={{ color: bodyColor, overflowWrap: 'break-word' }}
+            >
+              <span className="font-bold" style={{ color: labelColor }}>
+                • {rec.type}:{' '}
+              </span>
+              {renderBoldInline(rec.text, colorPrimary)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const TtContentPillarSlide: React.FC<Props> = ({
   config,
   isThumbnail = false,
   currentPage,
   totalPages,
+  savedInsights,
+  onInsightsChange,
 }) => {
   const [pillars, setPillars] = useState<TtPillar[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [insights, setInsights] = useState<Record<string, string>>({});
-  const [editing, setEditing] = useState<Record<string, string | null>>({});
+
+  // Eager init from savedInsights
+  const [insights, setInsights] = useState<Record<string, string>>(() => {
+    try {
+      return savedInsights ? JSON.parse(savedInsights) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [editing, setEditing] = useState<Record<string, boolean>>({});
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [generating, setGenerating] = useState<Record<string, boolean>>({});
-  const [showAiInput, setShowAiInput] = useState<Record<string, boolean>>({});
-  const [aiPrompts, setAiPrompts] = useState<Record<string, string>>({});
+
+  // Persist insights whenever they change
+  useEffect(() => {
+    onInsightsChange?.(JSON.stringify(insights));
+  }, [insights, onInsightsChange]);
 
   useEffect(() => {
     if (!config.clientName || isThumbnail) return;
@@ -107,28 +183,27 @@ export const TtContentPillarSlide: React.FC<Props> = ({
   const isDark = contentMode === 'dark';
   const colorPrimary = theme.colors.primary;
 
-  const handleGenerate = async (pillar: string, e?: React.FormEvent) => {
-    e?.preventDefault();
+  const handleGenerate = async (pillar: string) => {
     setGenerating((p) => ({ ...p, [pillar]: true }));
-    setShowAiInput((p) => ({ ...p, [pillar]: false }));
     try {
       const pillarData = pillars.find((p) => p.pillar === pillar);
-      const ctx =
-        pillarData?.posts
-          .map(
-            (p, i) =>
-              `Post ${i + 1}: Views=${fmtN(p.views)}, Engagement=${fmtN(p.engagement)}, VR=${fmtVR(p.vr_rate)}, AvgWatch=${fmtWT(p.avg_watch_time)}`,
-          )
-          .join('\n') || '';
-      const text = await generateGeminiContent(
-        `Analyze TikTok content pillar "${pillar}" for ${config.clientName} (${config.period}). Posts sorted Lowest→Highest by views:\n${ctx}\n${aiPrompts[pillar] ? `Focus: ${aiPrompts[pillar]}` : ''}\nWrite 2-3 SHORT bullet points (start each with -). Use **bold** for key numbers.`,
-      );
-      setInsights((p) => ({ ...p, [pillar]: text }));
+      if (!pillarData) return;
+      const promptData = {
+        pillarName: pillar,
+        posts: pillarData.posts.map((p) => ({
+          vr_rate: fmtVR(p.vr_rate).replace('%', ''),
+          views: fmtN(p.views),
+          engagement: fmtN(p.engagement),
+          avg_watch_time: fmtWT(p.avg_watch_time).replace('s', ''),
+        })),
+      };
+      const prompt = buildTtContentPillarPrompt(config.clientName, config.period, promptData);
+      const text = await generateGeminiContent(prompt, TT_CONTENT_PILLAR_ANALYST_SYSTEM_PROMPT);
+      setInsights((prev) => ({ ...prev, [pillar]: text }));
     } catch {
-      setInsights((p) => ({ ...p, [pillar]: 'Failed to generate insight.' }));
+      setInsights((prev) => ({ ...prev, [pillar]: 'Failed to generate insight.' }));
     } finally {
       setGenerating((p) => ({ ...p, [pillar]: false }));
-      setAiPrompts((prev) => ({ ...prev, [pillar]: '' }));
     }
   };
 
@@ -179,14 +254,26 @@ export const TtContentPillarSlide: React.FC<Props> = ({
         {/* Image — left 52% */}
         <div className="relative" style={{ flex: '0 0 52%' }}>
           {imgLoading ? (
-            <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#f1f5f9' }}>
+            <div
+              className="absolute inset-0 flex items-center justify-center"
+              style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#f1f5f9' }}
+            >
               <Loader2 size={12} className="animate-spin" style={{ color: colorPrimary }} />
             </div>
           ) : imageUrl ? (
-            <img src={imageUrl} alt={`Post #${rank}`} className="absolute inset-0 w-full h-full object-cover" />
+            <img
+              src={imageUrl}
+              alt={`Post #${rank}`}
+              className="absolute inset-0 w-full h-full object-cover"
+            />
           ) : (
-            <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#f1f5f9' }}>
-              <span className="text-[6px]" style={{ color: isDark ? '#4b5563' : '#94a3b8' }}>No image</span>
+            <div
+              className="absolute inset-0 flex items-center justify-center"
+              style={{ backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#f1f5f9' }}
+            >
+              <span className="text-[6px]" style={{ color: isDark ? '#4b5563' : '#94a3b8' }}>
+                No image
+              </span>
             </div>
           )}
         </div>
@@ -197,7 +284,13 @@ export const TtContentPillarSlide: React.FC<Props> = ({
         >
           <span
             className="text-[7px] font-bold text-white text-center leading-none self-start mb-1"
-            style={{ backgroundColor: colorPrimary, borderRadius: '4px', padding: '2px 6px', minWidth: '28px', display: 'inline-block' }}
+            style={{
+              backgroundColor: colorPrimary,
+              borderRadius: '4px',
+              padding: '2px 6px',
+              minWidth: '28px',
+              display: 'inline-block',
+            }}
           >
             #{rank}
           </span>
@@ -209,13 +302,30 @@ export const TtContentPillarSlide: React.FC<Props> = ({
             { label: 'Avg Watch', val: fmtWT(post.avg_watch_time) },
           ].map(({ label, val }) => (
             <div key={label} className="flex flex-col min-w-0">
-              <span className="text-[6px] shrink-0" style={{ color: isDark ? '#64748b' : '#94a3b8' }}>{label}</span>
-              <span className="text-[7px] font-bold truncate" style={{ color: isDark ? '#e2e8f0' : '#0f172a' }}>{val}</span>
+              <span
+                className="text-[6px] shrink-0"
+                style={{ color: isDark ? '#64748b' : '#94a3b8' }}
+              >
+                {label}
+              </span>
+              <span
+                className="text-[7px] font-bold truncate"
+                style={{ color: isDark ? '#e2e8f0' : '#0f172a' }}
+              >
+                {val}
+              </span>
             </div>
           ))}
           {post.url ? (
-            <a href={post.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-0.5 text-[6px] font-bold mt-auto" style={{ color: '#3b82f6' }}>
-              <ExternalLink size={6} />Link
+            <a
+              href={post.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-0.5 text-[6px] font-bold mt-auto"
+              style={{ color: '#3b82f6' }}
+            >
+              <ExternalLink size={6} />
+              Link
             </a>
           ) : (
             <div className="mt-auto h-2" />
@@ -228,9 +338,8 @@ export const TtContentPillarSlide: React.FC<Props> = ({
   // ── Insight Box ──────────────────────────────────────────────────────────
   const InsightBox: React.FC<{ pillar: string }> = ({ pillar }) => {
     const insight = insights[pillar] || '';
-    const isEdit = editing[pillar] === 'editing';
+    const isEdit = editing[pillar] || false;
     const isGen = generating[pillar] || false;
-    const showAi = showAiInput[pillar] || false;
     return (
       <div
         className="flex flex-col rounded-xl border overflow-hidden min-h-0 h-full"
@@ -249,7 +358,7 @@ export const TtContentPillarSlide: React.FC<Props> = ({
               className="text-[5.5px] font-bold uppercase tracking-wide"
               style={{ color: isDark ? '#e2e8f0' : '#475569' }}
             >
-              Insight
+              Analysis
             </span>
           </div>
           <div className="flex items-center gap-0.5">
@@ -257,7 +366,7 @@ export const TtContentPillarSlide: React.FC<Props> = ({
               <button
                 onClick={() => {
                   setEditValues((p) => ({ ...p, [pillar]: insight }));
-                  setEditing((p) => ({ ...p, [pillar]: 'editing' }));
+                  setEditing((p) => ({ ...p, [pillar]: true }));
                 }}
                 className="text-[5px] px-1 py-0.5 rounded-full border"
                 style={{
@@ -271,8 +380,8 @@ export const TtContentPillarSlide: React.FC<Props> = ({
             {isEdit && (
               <button
                 onClick={() => {
-                  setInsights((p) => ({ ...p, [pillar]: editValues[pillar] || '' }));
-                  setEditing((p) => ({ ...p, [pillar]: null }));
+                  setInsights((prev) => ({ ...prev, [pillar]: editValues[pillar] || '' }));
+                  setEditing((p) => ({ ...p, [pillar]: false }));
                 }}
                 className="text-[5px] px-1 py-0.5 rounded-full border"
                 style={{ color: colorPrimary, borderColor: colorPrimary }}
@@ -280,77 +389,54 @@ export const TtContentPillarSlide: React.FC<Props> = ({
                 Done
               </button>
             )}
-            <button
-              onClick={() => {
-                setShowAiInput((p) => ({ ...p, [pillar]: !showAi }));
-                setEditing((p) => ({ ...p, [pillar]: null }));
-              }}
-              className="flex items-center gap-0.5 px-1 py-0.5 rounded-full text-[5px] border"
-              style={{
-                backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#eef2ff',
-                color: isDark ? '#94a3b8' : '#6366f1',
-                borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#c7d2fe',
-              }}
-            >
-              <Sparkles size={5} />
-              AI
-            </button>
+            {!isEdit && (
+              <button
+                onClick={() => handleGenerate(pillar)}
+                disabled={isGen}
+                className="flex items-center gap-0.5 px-1 py-0.5 rounded-full text-[5px] border disabled:opacity-50"
+                style={{
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#eef2ff',
+                  color: isDark ? '#94a3b8' : '#6366f1',
+                  borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#c7d2fe',
+                }}
+              >
+                {isGen ? <Loader2 size={5} className="animate-spin" /> : <Sparkles size={5} />}
+                AI
+              </button>
+            )}
           </div>
         </div>
-        {showAi && (
-          <form
-            onSubmit={(e) => handleGenerate(pillar, e)}
-            className="flex gap-0.5 px-1 py-0.5 border-b shrink-0"
-            style={{
-              backgroundColor: isDark ? 'rgba(99,102,241,0.08)' : '#eef2ff',
-              borderColor: isDark ? 'rgba(99,102,241,0.2)' : '#c7d2fe',
-            }}
-          >
-            <input
-              type="text"
-              value={aiPrompts[pillar] || ''}
-              onChange={(e) => setAiPrompts((p) => ({ ...p, [pillar]: e.target.value }))}
-              placeholder="Optional focus…"
-              className="flex-1 text-[5.5px] px-1 py-0.5 rounded border focus:outline-none"
-              style={{
-                background: isDark ? 'rgba(255,255,255,0.08)' : '#fff',
-                borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#c7d2fe',
-                color: isDark ? '#fff' : '#374151',
-              }}
-            />
-            <button
-              type="submit"
-              disabled={isGen}
-              className="bg-indigo-600 text-white px-1 rounded disabled:opacity-50 flex items-center"
-            >
-              {isGen ? <Loader2 size={6} className="animate-spin" /> : <Send size={6} />}
-            </button>
-          </form>
-        )}
-        <div className="px-1.5 py-1 flex-1 overflow-y-auto">
+        <div className="px-1.5 py-1 flex-1 overflow-y-auto overflow-x-hidden min-w-0">
           {isGen ? (
             <div className="flex items-center gap-1 opacity-60">
               <Sparkles size={6} className="text-indigo-500 animate-spin" />
-              <span className="text-[5.5px] text-indigo-500 animate-pulse">Analyzing…</span>
+              <span className="text-[8px] text-indigo-500 animate-pulse">Analyzing…</span>
             </div>
           ) : isEdit ? (
             <textarea
               value={editValues[pillar] || ''}
               onChange={(e) => setEditValues((p) => ({ ...p, [pillar]: e.target.value }))}
               autoFocus
-              className="w-full h-full resize-none text-[5.5px] leading-relaxed focus:outline-none bg-transparent"
+              className="w-full h-full resize-none text-[8px] leading-relaxed focus:outline-none bg-transparent"
               style={{ color: isDark ? '#cbd5e1' : '#374151' }}
             />
           ) : insight ? (
-            <div
-              className="text-[5.5px] leading-relaxed"
-              style={{ color: isDark ? '#cbd5e1' : '#475569' }}
-            >
-              {renderTextWithHighlights(insight, isDark, colorPrimary)}
-            </div>
+            <PillarInsightView
+              raw={insight}
+              isDark={isDark}
+              colorPrimary={colorPrimary}
+              onEdit={() => {
+                setEditValues((p) => ({ ...p, [pillar]: insight }));
+                setEditing((p) => ({ ...p, [pillar]: true }));
+              }}
+            />
           ) : (
-            <span className="text-[5.5px]" style={{ color: isDark ? '#4b5563' : '#94a3b8' }}>
-              Click AI to generate, or Edit to type.
+            <span
+              className="text-[8px] cursor-pointer"
+              style={{ color: isDark ? '#4b5563' : '#94a3b8' }}
+              onClick={() => handleGenerate(pillar)}
+            >
+              Click AI to generate.
             </span>
           )}
         </div>
@@ -447,7 +533,6 @@ export const TtContentPillarSlide: React.FC<Props> = ({
             No data
           </div>
         ) : (
-          // Always render exactly 2 rows so each row is always half-height
           Array.from({ length: 2 }).map((_, rowIdx) => {
             const pillar = pillars[rowIdx];
             return (
@@ -494,7 +579,6 @@ export const TtContentPillarSlide: React.FC<Props> = ({
                     </div>
                   </>
                 ) : (
-                  /* Empty placeholder row to keep layout stable */
                   <div
                     className="flex-1 rounded-xl border-2 border-dashed"
                     style={{ borderColor: theme.border }}
@@ -524,6 +608,7 @@ export const TtContentPillarSlide: React.FC<Props> = ({
           totalPages={totalPages ?? 1}
           logo={config.coverDesign?.logoData}
           brandColor={config.coverDesign?.colors?.primary}
+          preparedBy={config.preparedBy}
         />
       </div>
     </div>

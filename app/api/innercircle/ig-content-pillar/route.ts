@@ -87,18 +87,12 @@ export async function GET(request: NextRequest) {
             AND content_pillar = $3
             AND ${PILLAR_FILTER}
         `;
-        const [lowestRows, highestRows] = await Promise.all([
-          query(`${postSelect} ORDER BY ig_engagement_a::numeric ASC  NULLS LAST LIMIT 6`, [
-            brand,
-            monthYear,
-            pillar,
-          ]),
-          query(`${postSelect} ORDER BY ig_engagement_a::numeric DESC NULLS LAST LIMIT 6`, [
-            brand,
-            monthYear,
-            pillar,
-          ]),
-        ]);
+        // Fetch all posts for this pillar ordered highest→lowest engagement
+        // Then split: top 6 → highest, rest (up to 6) → lowest. No post appears in both.
+        const allRows = await query(
+          `${postSelect} ORDER BY ig_engagement_a::numeric DESC NULLS LAST`,
+          [brand, monthYear, pillar],
+        ) as any[];
 
         const parsePost = (r: any, imgMap: Map<string, string>) => ({
           reach: r.reach !== null ? parseFloat(r.reach) : null,
@@ -113,16 +107,19 @@ export async function GET(request: NextRequest) {
           image_url: (r.url && imgMap.get(r.url)) || null,
         });
 
-        // Batch image cache lookup for this pillar's posts
-        const allUrls = [...(lowestRows as any[]), ...(highestRows as any[])]
-          .map((r) => r.url)
-          .filter(Boolean) as string[];
+        // Batch image cache lookup
+        const allUrls = allRows.map((r) => r.url).filter(Boolean) as string[];
         const imgMap = await batchImageCache([...new Set(allUrls)]);
+
+        // Split in half: top half → highest (left), bottom half → lowest (right). No overlap.
+        const half = Math.ceil(allRows.length / 2);
+        const highestRows = allRows.slice(0, half).slice(0, 6);       // best performers, max 6
+        const lowestRows = allRows.slice(half).reverse().slice(0, 6); // worst performers, max 6
 
         return {
           pillar,
-          lowest: (lowestRows as any[]).map((r) => parsePost(r, imgMap)),
-          highest: (highestRows as any[]).map((r) => parsePost(r, imgMap)),
+          highest: highestRows.map((r) => parsePost(r, imgMap)),
+          lowest: lowestRows.map((r) => parsePost(r, imgMap)),
         };
       }),
     );

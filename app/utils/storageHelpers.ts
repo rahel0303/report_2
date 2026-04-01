@@ -36,7 +36,7 @@ export const getDefaultConfig = (): ReportConfig => ({
   period: getLastMonth(),
   theme: themesData[0],
   font: fontsData[0],
-  clientName: 'BNI',
+  clientName: '',
   selectedCompetitors: [],
   coverDesign: undefined,
 });

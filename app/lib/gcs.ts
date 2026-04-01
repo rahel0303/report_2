@@ -31,6 +31,18 @@ export async function downloadFromGCS(objectName: string): Promise<Buffer> {
   return buffer;
 }
 
+/** Generate a signed URL for direct browser upload to GCS (valid 15 minutes). */
+export async function getSignedUploadUrl(objectName: string): Promise<string> {
+  const file = getBucket().file(objectName);
+  const [url] = await file.getSignedUrl({
+    version: 'v4',
+    action: 'write',
+    expires: Date.now() + 15 * 60 * 1000,
+    contentType: PPTX_MIME,
+  });
+  return url;
+}
+
 /** Delete a file from GCS. */
 export async function deleteFromGCS(objectName: string): Promise<void> {
   try {

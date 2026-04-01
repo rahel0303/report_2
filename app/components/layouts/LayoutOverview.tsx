@@ -192,6 +192,7 @@ export const LayoutOverview: React.FC<LayoutProps> = ({
           totalPages={totalPages}
           logo={config.coverDesign?.logoData}
           brandColor={theme.colors.primary}
+          preparedBy={config.preparedBy}
         />
       </div>
     </div>

@@ -1,11 +1,17 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Sparkles } from 'lucide-react';
 import { ReportConfig } from '@/app/types';
 import { SlideFooter } from '@/app/components/ui/SlideFooter';
 import { ChannelBadge } from '@/app/components/ui';
 import { generateLayoutTheme } from '@/app/utils/themeStyles';
+import { generateGeminiContent } from '@/app/utils/api';
+import {
+  COMP_OVERVIEW_ANALYST_SYSTEM_PROMPT,
+  buildCompOverviewPrompt,
+  parseCompOverviewInsight,
+} from '@/app/innercircle/prompts/compOverviewPrompt';
 
 // competitor_page_28.py equivalent
 // 3 side-by-side tables: Instagram · TikTok · Twitter
@@ -43,14 +49,14 @@ interface Props {
   isThumbnail?: boolean;
   currentPage?: number;
   totalPages?: number;
+  savedInsight?: string;
+  onInsightChange?: (value: string) => void;
 }
 
 // ── Formatters matching competitor_page_28.py logic ──────────────────────────
 function fmtN(v: number | null): string {
   if (v === null || isNaN(v)) return '-';
-  if (Math.abs(v) >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M';
-  if (Math.abs(v) >= 1_000) return (v / 1_000).toFixed(1) + 'K';
-  return Math.round(v).toLocaleString();
+  return v.toLocaleString();
 }
 
 /** fmt_pct: fraction (<2) → multiply by 100; else use as-is */
@@ -186,14 +192,19 @@ export const CompetitorOverviewSlide: React.FC<Props> = ({
   isThumbnail = false,
   currentPage,
   totalPages,
+  savedInsight,
+  onInsightChange,
 }) => {
   const [igTable, setIgTable] = useState<IgRow[]>([]);
   const [ttTable, setTtTable] = useState<TtRow[]>([]);
   const [twTable, setTwTable] = useState<TwRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [insight, setInsight] = useState('');
-  const [editingInsight, setEditingInsight] = useState(false);
+
+  const [insight, setInsight] = useState<string>(() => savedInsight || '');
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
     if (!config.clientName || isThumbnail) return;
@@ -229,6 +240,55 @@ export const CompetitorOverviewSlide: React.FC<Props> = ({
   const IG_COLOR = '#E1306C';
   const TT_COLOR = '#EE1D52';
   const TW_COLOR = '#1DA1F2';
+
+  const persistInsight = (text: string) => {
+    setInsight(text);
+    onInsightChange?.(text);
+  };
+
+  const handleGenerate = async () => {
+    setIsGenerating(true);
+    try {
+      const igRows = igTable.map((r) => ({
+        competitor: r.competitor,
+        followers_inc: fmtN(r.followers_inc),
+        followers_growth: fmtPct(r.followers_growth),
+        ig_engagement: fmtN(r.ig_engagement),
+        ig_engagement_growth: fmtPct(r.ig_engagement_growth),
+        er_folls: fmtER(r.er_folls),
+      }));
+      const ttRows = ttTable.map((r) => ({
+        competitor: r.competitor,
+        followers_growth: fmtN(r.followers_growth),
+        followers_growth_inc: fmtPct(r.followers_growth_inc),
+        engagement: fmtN(r.engagement),
+        engagement_inc: fmtPct(r.engagement_inc),
+        avg_views: fmtN(r.avg_views),
+        avg_views_inc: fmtPct(r.avg_views_inc),
+      }));
+      const twRows = twTable.map((r) => ({
+        competitor: r.competitor,
+        followers_growth: fmtN(r.followers_growth),
+        followers_growth_inc: fmtPct(r.followers_growth_inc),
+        engagement: fmtN(r.engagement),
+        engagement_inc: fmtPct(r.engagement_inc),
+        er_folls: fmtER(r.er_folls),
+      }));
+      const prompt = buildCompOverviewPrompt(
+        config.clientName,
+        config.period,
+        igRows,
+        ttRows,
+        twRows,
+      );
+      const text = await generateGeminiContent(prompt, COMP_OVERVIEW_ANALYST_SYSTEM_PROMPT);
+      persistInsight(text);
+    } catch {
+      persistInsight('Failed to generate insight.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   if (isThumbnail) {
     return (
@@ -325,6 +385,17 @@ export const CompetitorOverviewSlide: React.FC<Props> = ({
       {fmtER(r.er_folls)}
     </span>,
   ]);
+
+  const renderBold = (text: string) =>
+    text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
+      part.startsWith('**') ? (
+        <span key={i} className="font-bold" style={{ color: colorPrimary }}>
+          {part.slice(2, -2)}
+        </span>
+      ) : (
+        <span key={i}>{part}</span>
+      ),
+    );
 
   return (
     <div
@@ -428,58 +499,113 @@ export const CompetitorOverviewSlide: React.FC<Props> = ({
         </div>
       )}
 
-      {/* ── Insight / Analysis box ──────────────────────────────────────────── */}
+      {/* ── Analysis / Insight panel ─────────────────────────────────────────── */}
       <div
-        className="shrink-0 mx-5 mt-2.5 mb-2 rounded-xl overflow-hidden"
+        className="shrink-0 mx-5 mt-2.5 mb-2 rounded-xl overflow-hidden flex flex-col"
         style={{
-          backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : `${colorPrimary}08`,
-          border: `1px solid ${colorPrimary}30`,
+          backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#ffffff',
+          border: `1px solid ${theme.border}`,
+          boxShadow: theme.cardShadow,
           flex: '1 1 0',
-          minHeight: 130,
+          minHeight: 100,
         }}
       >
+        {/* Panel header */}
         <div
-          className="px-3 py-1.5 border-b flex items-center justify-between shrink-0"
-          style={{ borderColor: `${colorPrimary}25` }}
+          className="flex items-center justify-between px-3 py-2 border-b shrink-0"
+          style={{ borderColor: theme.border }}
         >
-          <span
-            className="text-[9px] font-bold uppercase tracking-wider"
-            style={{ color: colorPrimary }}
-          >
-            Analysis & Insights
-          </span>
-          <button
-            onClick={() => setEditingInsight(!editingInsight)}
-            className="text-[8px] font-medium px-2 py-0.5 rounded"
-            style={{
-              color: editingInsight ? '#6b7280' : colorPrimary,
-              backgroundColor: editingInsight ? '#f3f4f6' : `${colorPrimary}15`,
-            }}
-          >
-            {editingInsight ? 'Done' : 'Edit'}
-          </button>
+          <div className="flex items-center gap-1.5">
+            <Sparkles size={11} style={{ color: colorPrimary }} />
+            <span
+              className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-white' : 'text-slate-700'}`}
+            >
+              Analysis & Insights
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            {insight && !isEditing && (
+              <button
+                onClick={() => { setEditValue(insight); setIsEditing(true); }}
+                className={`text-[9px] font-medium px-2 py-0.5 rounded-full border transition-all ${isDark ? 'text-slate-400 border-white/10 hover:bg-white/10' : 'text-slate-500 border-slate-200 hover:bg-slate-50'}`}
+              >
+                Edit
+              </button>
+            )}
+            {!isEditing && (
+              <button
+                onClick={handleGenerate}
+                disabled={isGenerating}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium border transition-all disabled:opacity-50 ${isDark ? 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10' : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100'}`}
+              >
+                {isGenerating ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />}
+                <span>AI</span>
+              </button>
+            )}
+          </div>
         </div>
-        {editingInsight ? (
-          <textarea
-            autoFocus
-            className="w-full h-full bg-transparent resize-none outline-none px-3 py-2 text-[10px] leading-relaxed"
-            style={{ color: isDark ? '#d1d5db' : '#374151', minHeight: 70 }}
-            value={insight}
-            placeholder="Add insights / analysis here…"
-            onChange={(e) => setInsight(e.target.value)}
-            onBlur={() => setEditingInsight(false)}
-          />
-        ) : (
-          <p
-            className="px-3 py-2 text-[10px] leading-relaxed cursor-text"
-            style={{
-              color: insight ? (isDark ? '#d1d5db' : '#475569') : isDark ? '#4b5563' : '#94a3b8',
-            }}
-            onClick={() => setEditingInsight(true)}
-          >
-            {insight || 'Click to add insights / analysis…'}
-          </p>
-        )}
+
+        {/* Panel body */}
+        <div className="flex-1 overflow-auto p-3 min-h-0">
+          {isGenerating ? (
+            <div className="flex flex-col items-center justify-center h-full gap-2 opacity-70">
+              <Sparkles size={20} className="text-indigo-500 animate-spin" />
+              <span className="text-[10px] text-indigo-500 font-medium animate-pulse">Analyzing…</span>
+            </div>
+          ) : isEditing ? (
+            <div className="h-full flex flex-col gap-2">
+              <textarea
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                maxLength={800}
+                autoFocus
+                className={`flex-1 text-[11px] leading-relaxed p-2 rounded border focus:outline-none resize-none w-full ${isDark ? 'bg-white/10 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                placeholder="Type your analysis here…"
+              />
+              <div className="flex justify-end gap-2 shrink-0">
+                <button onClick={() => setIsEditing(false)} className={`text-[9px] px-3 py-1 rounded border ${isDark ? 'border-white/20 text-slate-400' : 'border-slate-200 text-slate-500'}`}>Cancel</button>
+                <button onClick={() => { persistInsight(editValue); setIsEditing(false); }} className="text-[9px] px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">Save</button>
+              </div>
+            </div>
+          ) : insight ? (
+            <div
+              data-ic-insight
+              className="flex flex-col gap-1.5 cursor-pointer"
+              onClick={() => { setEditValue(insight); setIsEditing(true); }}
+            >
+              {(() => {
+                const parsed = parseCompOverviewInsight(insight);
+                const bodyColor = isDark ? '#cbd5e1' : '#475569';
+                const labelColor = isDark ? '#e2e8f0' : '#374151';
+                return (
+                  <>
+                    {parsed.analysis && (
+                      <div className="text-[11px] leading-relaxed font-medium" style={{ color: bodyColor }}>
+                        {renderBold(parsed.analysis)}
+                      </div>
+                    )}
+                    {parsed.recommendations.map((rec) => (
+                      <div key={rec.type} className="text-[10px] leading-snug" style={{ color: bodyColor }}>
+                        <span className="font-bold" style={{ color: labelColor }}>• {rec.type}: </span>
+                        {renderBold(rec.text)}
+                      </div>
+                    ))}
+                  </>
+                );
+              })()}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full gap-3 cursor-pointer group" onClick={() => { setEditValue(''); setIsEditing(true); }}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all group-hover:scale-105 ${isDark ? 'bg-white/10' : 'bg-indigo-50'}`}>
+                <Sparkles size={16} style={{ color: colorPrimary }} />
+              </div>
+              <div className="text-center">
+                <p className={`text-[10px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Click AI to generate</p>
+                <p className={`text-[9px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>or click to write manually</p>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Hidden export data — read by exportHelpers.ts */}
@@ -495,6 +621,7 @@ export const CompetitorOverviewSlide: React.FC<Props> = ({
         totalPages={totalPages ?? 1}
         logo={config.coverDesign?.logoData}
         brandColor={config.coverDesign?.colors?.primary}
+        preparedBy={config.preparedBy}
       />
     </div>
   );

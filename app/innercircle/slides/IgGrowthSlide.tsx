@@ -11,19 +11,24 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { BarChart2, Sparkles, Loader2, Wand2, Check, X } from 'lucide-react';
+import { BarChart2, Sparkles, Loader2 } from 'lucide-react';
 import { ReportConfig } from '@/app/types';
 import { SlideFooter } from '@/app/components/ui/SlideFooter';
 import { ChannelBadge } from '@/app/components/ui';
 import { generateLayoutTheme } from '@/app/utils/themeStyles';
 import { generateGeminiContent } from '@/app/utils/api';
-import { renderTextWithHighlights } from '@/app/utils/helpers';
-import { buildIgGrowthPrompt, REFINE_SYSTEM_PROMPT } from '@/app/lib/insightPrompts';
+import {
+  IG_GROWTH_ANALYST_SYSTEM_PROMPT,
+  buildIgGrowthAnalystPrompt,
+  parseIgGrowthInsight,
+  type ParsedInsight,
+} from '@/app/innercircle/prompts/igGrowthPrompt';
 
 // instagram_page_8.py — Combined chart (Followers Growth + Profile Reach dual-axis) + Analysis + Table
 
 const IG_ORANGE = '#E67E22'; // Followers Growth — orange
 const IG_BLUE = '#3B82F6'; // Profile Reach — blue (clearly distinct)
+
 
 const TABLE_HEADERS = [
   'Month',
@@ -78,10 +83,62 @@ function shortDate(d: string): string {
 }
 
 function fmtNum(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K';
   return n.toLocaleString();
 }
+
+// ─── inline bold renderer (no block wrapper) ─────────────────
+const renderBoldInline = (text: string, color: string) =>
+  text.split(/(\*\*.*?\*\*)/g).map((part, i) =>
+    part.startsWith('**') && part.endsWith('**')
+      ? <span key={i} className="font-bold" style={{ color }}>{part.slice(2, -2)}</span>
+      : <span key={i}>{part}</span>,
+  );
+
+// ─── IgInsightView ───────────────────────────────────────────
+const IgInsightView: React.FC<{
+  raw: string;
+  isDark: boolean;
+  colorPrimary: string;
+  onEdit: () => void;
+}> = ({ raw, isDark, colorPrimary, onEdit }) => {
+  const parsed: ParsedInsight = React.useMemo(() => parseIgGrowthInsight(raw), [raw]);
+  const bodyColor = isDark ? 'text-slate-300' : 'text-slate-600';
+  const labelColor = isDark ? 'text-slate-200' : 'text-slate-700';
+
+  return (
+    <div
+      data-ic-insight
+      data-insight-raw={raw}
+      className="flex flex-col gap-2 w-full min-w-0 cursor-pointer"
+      onClick={onEdit}
+    >
+      {parsed.analysis && (
+        <div
+          className={`text-[11px] leading-relaxed font-medium break-words ${bodyColor}`}
+          style={{ overflowWrap: 'break-word', wordBreak: 'break-word' }}
+        >
+          {renderBoldInline(parsed.analysis, colorPrimary)}
+        </div>
+      )}
+      {parsed.recommendations.length > 0 && (
+        <div className="flex flex-col gap-1 w-full min-w-0">
+          {parsed.recommendations.map((rec) => (
+            <div
+              key={rec.type}
+              className={`text-[10px] leading-snug break-words ${bodyColor}`}
+              style={{ overflowWrap: 'break-word', wordBreak: 'break-word' }}
+            >
+              <span className={`font-bold ${labelColor}`}>• {rec.type}: </span>
+              {renderBoldInline(rec.text, colorPrimary)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
 
 export const IgGrowthSlide: React.FC<Props> = ({
   config,
@@ -103,12 +160,6 @@ export const IgGrowthSlide: React.FC<Props> = ({
 
   // AI generate state
   const [isGenerating, setIsGenerating] = useState(false);
-
-  // Refine state
-  const [showRefineInput, setShowRefineInput] = useState(false);
-  const [refinePrompt, setRefinePrompt] = useState('');
-  const [refinePreview, setRefinePreview] = useState<string | null>(null);
-  const [isRefining, setIsRefining] = useState(false);
 
   useEffect(() => {
     if (!config.clientName || isThumbnail) return;
@@ -159,8 +210,8 @@ export const IgGrowthSlide: React.FC<Props> = ({
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
-      const { prompt, systemPrompt } = buildIgGrowthPrompt(config.clientName, config.period, tableRows);
-      const text = await generateGeminiContent(prompt, systemPrompt);
+      const prompt = buildIgGrowthAnalystPrompt(config.clientName, config.period, tableRows);
+      const text = await generateGeminiContent(prompt, IG_GROWTH_ANALYST_SYSTEM_PROMPT);
       setInsight(text);
       onInsightChange?.(text);
     } catch {
@@ -174,31 +225,6 @@ export const IgGrowthSlide: React.FC<Props> = ({
     setInsight(editValue);
     onInsightChange?.(editValue);
     setIsEditing(false);
-  };
-
-  const handleRefine = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    setIsRefining(true);
-    setShowRefineInput(false);
-    try {
-      const charLimit = insight.length;
-      const systemPrompt = REFINE_SYSTEM_PROMPT;
-      const prompt = `Original text (${charLimit} chars):\n\n${insight}${refinePrompt ? `\n\nAdditional instruction: ${refinePrompt}` : ''}`;
-      const text = await generateGeminiContent(prompt, systemPrompt);
-      setRefinePreview(text.trim());
-    } catch {
-      // silently fail — keep current insight
-    } finally {
-      setIsRefining(false);
-      setRefinePrompt('');
-    }
-  };
-
-  const handleApplyRefine = () => {
-    if (!refinePreview) return;
-    setInsight(refinePreview);
-    onInsightChange?.(refinePreview);
-    setRefinePreview(null);
   };
 
   // Thumbnail
@@ -286,13 +312,13 @@ export const IgGrowthSlide: React.FC<Props> = ({
           </div>
         ) : (
           <>
-            {/* ── Top row: Chart (left) + Analysis (right) — grows to fill remaining space ── */}
-            <div className="flex gap-2.5 min-h-0" style={{ flex: '1 1 0' }}>
+            {/* ── Top row: Chart (left) + Analysis (right) ── */}
+            <div className="flex gap-2.5 min-h-0" style={{ flex: '0 0 63%' }}>
               {/* 2 stacked line charts */}
               <div
                 className="rounded-xl border overflow-hidden flex flex-col"
                 style={{
-                  flex: '0 0 63%',
+                  flex: '0 0 56%',
                   backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#ffffff',
                   boxShadow: theme.cardShadow,
                   borderColor: theme.border,
@@ -426,49 +452,24 @@ export const IgGrowthSlide: React.FC<Props> = ({
                 >
                   <div className="flex items-center gap-1.5">
                     <Sparkles size={11} style={{ color: colorPrimary }} />
-                    <span
-                      className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-white' : 'text-slate-700'}`}
-                    >
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-white' : 'text-slate-700'}`}>
                       Analysis
                     </span>
                   </div>
                   <div className="flex items-center gap-1">
-                    {insight && !isEditing && !refinePreview && (
-                      <>
-                        <button
-                          onClick={() => {
-                            setShowRefineInput(!showRefineInput);
-                          }}
-                          className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium border transition-all ${
-                            showRefineInput
-                              ? isDark
-                                ? 'bg-amber-500/30 text-amber-300 border-amber-500/50'
-                                : 'bg-amber-100 text-amber-700 border-amber-200'
-                              : isDark
-                                ? 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10'
-                                : 'bg-amber-50 text-amber-600 border-amber-100 hover:bg-amber-100'
-                          }`}
-                        >
-                          <Wand2 size={9} />
-                          <span>{showRefineInput ? 'Close' : 'Refine'}</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            setEditValue(insight);
-                            setIsEditing(true);
-                            setShowRefineInput(false);
-                          }}
-                          className={`text-[9px] font-medium px-2 py-0.5 rounded-full border transition-all ${
-                            isDark
-                              ? 'text-slate-400 border-white/10 hover:bg-white/10'
-                              : 'text-slate-500 border-slate-200 hover:bg-slate-50'
-                          }`}
-                        >
-                          Edit
-                        </button>
-                      </>
+                    {insight && !isEditing && (
+                      <button
+                        onClick={() => { setEditValue(insight); setIsEditing(true); }}
+                        className={`text-[9px] font-medium px-2 py-0.5 rounded-full border transition-all ${
+                          isDark
+                            ? 'text-slate-400 border-white/10 hover:bg-white/10'
+                            : 'text-slate-500 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        Edit
+                      </button>
                     )}
-                    {!isEditing && !refinePreview && (
+                    {!isEditing && (
                       <button
                         onClick={handleGenerate}
                         disabled={isGenerating}
@@ -485,92 +486,14 @@ export const IgGrowthSlide: React.FC<Props> = ({
                   </div>
                 </div>
 
-                {/* Refine input row */}
-                {showRefineInput && (
-                  <div
-                    className="px-3 py-2 border-b shrink-0"
-                    style={{
-                      backgroundColor: isDark ? 'rgba(245,158,11,0.1)' : '#fffbeb',
-                      borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a',
-                    }}
-                  >
-                    <form onSubmit={handleRefine} className="flex gap-2">
-                      <input
-                        type="text"
-                        value={refinePrompt}
-                        onChange={(e) => setRefinePrompt(e.target.value)}
-                        placeholder="Instruksi tambahan (opsional)…"
-                        maxLength={150}
-                        className={`flex-1 text-[10px] px-2 py-1 rounded border focus:outline-none ${
-                          isDark
-                            ? 'bg-white/10 border-white/10 text-white placeholder:text-white/30'
-                            : 'bg-white border-amber-200 text-slate-700'
-                        }`}
-                      />
-                      <button
-                        type="submit"
-                        disabled={isRefining}
-                        className="bg-amber-500 text-white px-2.5 rounded hover:bg-amber-600 disabled:opacity-50 flex items-center justify-center"
-                      >
-                        {isRefining ? (
-                          <Loader2 size={10} className="animate-spin" />
-                        ) : (
-                          <Wand2 size={10} />
-                        )}
-                      </button>
-                    </form>
-                  </div>
-                )}
-
-
                 {/* Content */}
-                <div className="flex-1 min-h-0 p-3 flex flex-col overflow-hidden">
+                <div className="flex-1 min-h-0 min-w-0 p-3 flex flex-col overflow-y-auto overflow-x-hidden">
                   {isGenerating ? (
                     <div className="flex flex-col items-center justify-center h-full gap-2 opacity-70">
                       <Sparkles size={20} className="text-indigo-500 animate-spin" />
                       <span className="text-[10px] text-indigo-500 font-medium animate-pulse">
                         Analyzing…
                       </span>
-                    </div>
-                  ) : isRefining ? (
-                    <div className="flex flex-col items-center justify-center h-full gap-2 opacity-70">
-                      <Wand2 size={20} className="text-amber-500 animate-spin" />
-                      <span className="text-[10px] font-medium animate-pulse text-amber-500">
-                        Refining…
-                      </span>
-                    </div>
-                  ) : refinePreview ? (
-                    <div className="h-full flex flex-col gap-2 overflow-hidden">
-                      <div
-                        className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded w-fit shrink-0 ${
-                          isDark ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-100 text-amber-700'
-                        }`}
-                      >
-                        Preview
-                      </div>
-                      <div
-                        className={`flex-1 text-[11px] font-medium overflow-hidden ${
-                          isDark ? 'text-slate-200' : 'text-slate-700'
-                        }`}
-                      >
-                        {renderTextWithHighlights(refinePreview, isDark, colorPrimary)}
-                      </div>
-                      <div className="flex justify-end gap-2 shrink-0">
-                        <button
-                          onClick={() => setRefinePreview(null)}
-                          className={`flex items-center gap-1 text-[9px] px-3 py-1 rounded border ${
-                            isDark ? 'border-white/20 text-slate-400' : 'border-slate-200 text-slate-500'
-                          }`}
-                        >
-                          <X size={9} /> Discard
-                        </button>
-                        <button
-                          onClick={handleApplyRefine}
-                          className="flex items-center gap-1 text-[9px] px-3 py-1 rounded bg-amber-500 text-white hover:bg-amber-600"
-                        >
-                          <Check size={9} /> Apply
-                        </button>
-                      </div>
                     </div>
                   ) : isEditing ? (
                     <div className="h-full flex flex-col gap-2 overflow-hidden">
@@ -601,17 +524,12 @@ export const IgGrowthSlide: React.FC<Props> = ({
                       </div>
                     </div>
                   ) : insight ? (
-                    <div
-                      data-ic-insight
-                      data-insight-raw={insight}
-                      className={`h-full text-[11px] font-medium overflow-hidden cursor-pointer ${isDark ? 'text-slate-300' : 'text-slate-600'}`}
-                      onClick={() => {
-                        setEditValue(insight);
-                        setIsEditing(true);
-                      }}
-                    >
-                      {renderTextWithHighlights(insight, isDark, colorPrimary)}
-                    </div>
+                    <IgInsightView
+                      raw={insight}
+                      isDark={isDark}
+                      colorPrimary={colorPrimary}
+                      onEdit={() => { setEditValue(insight); setIsEditing(true); }}
+                    />
                   ) : (
                     <div
                       className="flex flex-col items-center justify-center h-full gap-3 cursor-pointer group"
@@ -665,16 +583,17 @@ export const IgGrowthSlide: React.FC<Props> = ({
                   data-ic-ig-table
                   className="rounded-xl border overflow-hidden flex flex-col"
                   style={{
-                    flex: '0 0 auto',
+                    flex: '1 1 0',
+                    minHeight: 0,
                     backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#ffffff',
                     boxShadow: theme.cardShadow,
                     borderColor: theme.border,
                   }}
                 >
                   <div className="h-0.5 shrink-0" style={{ background: theme.accentLine }} />
-                  <div className="overflow-visible">
+                  <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden h-full">
                     {tableRows.length > 0 ? (
-                      <table className="w-full border-collapse" style={{ tableLayout: 'fixed' }}>
+                      <table className="w-full h-full border-collapse" style={{ tableLayout: 'fixed' }}>
                         <thead>
                           <tr
                             style={{
@@ -687,7 +606,7 @@ export const IgGrowthSlide: React.FC<Props> = ({
                             {TABLE_HEADERS.map((h, ci) => (
                               <th
                                 key={h}
-                                className="px-2 py-2.5 font-bold text-center whitespace-nowrap"
+                                className="px-2 py-1.5 font-bold text-center whitespace-nowrap"
                                 style={{
                                   color: '#ffffff',
                                   fontSize: 12,
@@ -722,7 +641,7 @@ export const IgGrowthSlide: React.FC<Props> = ({
                                 {rowCells.map((cell, ci) => (
                                   <td
                                     key={ci}
-                                    className="px-2 py-2.5 whitespace-nowrap border-b"
+                                    className="px-2 py-1 whitespace-nowrap border-b"
                                     style={{
                                       borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9',
                                       color:
@@ -770,6 +689,7 @@ export const IgGrowthSlide: React.FC<Props> = ({
           totalPages={totalPages ?? 1}
           logo={config.coverDesign?.logoData}
           brandColor={config.coverDesign?.colors?.primary}
+          preparedBy={config.preparedBy}
         />
       </div>
     </div>

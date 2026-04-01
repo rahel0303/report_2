@@ -249,6 +249,7 @@ export const LayoutCustom: React.FC<LayoutProps> = ({
         totalPages={totalPages}
         logo={config.coverDesign?.logoData}
         brandColor={config.theme.brandColor}
+        preparedBy={config.preparedBy}
       />
     </div>
   );

@@ -21,7 +21,17 @@
       "Bash(find \"D:/alva/phase 2/report_2\" -type f -name \"*.py\" 2>/dev/null | head -10)",
       "Bash(PGPASSWORD=pass1234 \"/c/Program Files/PostgreSQL/17/bin/psql\" -h 10.100.14.216 -p 5432 -U postgres -d socmed_report -f \"D:/alva/phase 2/report_2/database/export_history.sql\")",
       "Bash(PGPASSWORD=pass1234 \"/c/Program Files/PostgreSQL/17/bin/psql\" -h 10.100.14.216 -p 5432 -U postgres -d socmed_report -c \"DROP TABLE IF EXISTS public.export_history;\" && PGPASSWORD=pass1234 \"/c/Program Files/PostgreSQL/17/bin/psql\" -h 10.100.14.216 -p 5432 -U postgres -d socmed_report -f \"D:/alva/phase 2/report_2/database/export_history.sql\")",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(ls:*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(python -c \":*)",
+      "Bash(ping -n 2 10.100.14.69)",
+      "Bash(ping -n 2 10.100.14.129)",
+      "Bash(ping:*)",
+      "Bash(tar -czf \"%USERPROFILE%\\\\report-app.tar.gz\" --exclude=\".git\" --exclude=\"node_modules\" --exclude=\".next\" .)",
+      "Bash(tar -czf \"C:/Users/ASUS/report-app.tar.gz\" --exclude=\".git\" --exclude=\"node_modules\" --exclude=\".next\" .)",
+      "Bash(tar -czf ~/report-app.tar.gz --exclude=\".git\" --exclude=\"node_modules\" --exclude=\".next\" .)"
     ]
   }
 }
